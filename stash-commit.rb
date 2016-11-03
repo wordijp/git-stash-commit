@@ -1,9 +1,9 @@
 #!ruby
 
-$:.unshift File.dirname(__FILE__)  # ロードパスにカレントディレクトリを追加
-require 'shutil.rb'
+$:.unshift File.dirname(__FILE__)
+require 'helper.rb'
 
-MAX=4
+MAX=5
 def tryCheckoutB(i, branch, hash, title)
   stash="stash-commit/#{branch}@#{i}"
 
@@ -17,7 +17,7 @@ def tryCheckoutB(i, branch, hash, title)
   return false
 end
 
-def f
+def f(argv)
   hash=`git revision`
   branch=`git branch-name`
   title=`git title`
@@ -25,6 +25,11 @@ def f
   if `git changes-count` == '0' then
     puts 'not need'
     return
+  end
+  
+  # parse argv
+  argv.each do |arg|
+    puts "arg:#{arg}"
   end
   
   MAX.times do |i|
@@ -39,4 +44,4 @@ def f
   return false
 end
 
-f
+f ARGV
