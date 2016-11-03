@@ -1,18 +1,7 @@
 #!ruby
 
-# 外部コマンドステータスの拡張メソッド
-# usage) $?.ok?
-class NilClass
-  def ok?
-    true
-  end
-end
-class Process::Status
-  def ok?
-    !!("#{self}" =~ /exit 0$/)
-  end
-end
-
+$:.unshift File.dirname(__FILE__)  # 繝ｭ繝ｼ繝峨ヱ繧ｹ縺ｫ繧ｫ繝ｬ繝ｳ繝医ョ繧｣繝ｬ繧ｯ繝医Μ繧定ｿｽ蜉
+require 'shutil.rb'
 
 MAX=4
 def tryCheckoutB(i, branch, hash, title)
