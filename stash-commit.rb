@@ -22,6 +22,20 @@ def getTmp
   `git stash-commit-list-all | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
 end
 
+def validateTo(to)
+  # 数値 or ブランチ名
+  if to == ''
+    puts 'target name is empty'
+    return false
+  end
+  if to.match(/#{TMP_SUFFIX}$/)
+    puts "/#{TMP_SUFFIX}$/ is reserved words"
+    return false
+  end
+
+  return true
+end
+
 def validateRebase
   return true if systemRet 'git rebase-in-progress'
   return true if getTmp != ''
@@ -187,12 +201,12 @@ def main(argv)
       commitMessage = argv[i]
     when '--to'
       i += 1
-      # TODO : バリエーション対応(コミットハッシュ | ブランチ名)
       if i >= argv.length
         usage
         Kernel.exit false
       end
-      to = argv[i].to_i
+      to = argv[i]
+      Kernel.exit false if !validateTo to
     when '--continue'
       if argv.length != 1
         usage
