@@ -25,7 +25,7 @@ end
 def validateRebase
   return true if systemRet 'git rebase-in-progress'
   return true if getTmp != ''
-  
+
   puts 'stash-commit (--continue | --skip | --abort) is not need'
   return false
 end
@@ -35,7 +35,7 @@ def validateStashCommit(branch)
     puts "can't work in stash-commit branch" # ネストはややこしい
     return false
   end
-  
+
   return true
 end
 
@@ -58,13 +58,11 @@ end
 
 def tryStashCommitGrow(branch, to, commitMessage)
   return true if tryStashCommit branch, to, commitMessage
-  
+
   # 存在してるので、そのブランチへ追加する
-  # 一意の名前(Timestamp)を使う
   toTmp = "#{to}-#{TMP_SUFFIX}"
   tmpBranch = stashName branch, toTmp
   stashBranch = stashName branch, to
-  # TODO : 失敗時の巻き戻しに対応
   return false if !tryCommitTracked tmpBranch, commitMessage
   return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
   return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
@@ -82,20 +80,21 @@ def tryStashCommitContinue
     puts 'tmp is not found'
     return false
   end
-  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-progresstmp$/)[1]
-  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-progresstmp$/)[1]
+  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
 
-  # NOTE : rebase --continueの前と後、rebase --abort後の別ブランチの違いを吸収する
   # rebase --continue前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --continue')
-  # git rebase --abort後で別ブランチかもしれない
+  # rebase --abort後で別ブランチかもしれない
   return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
+  # rebase --skip後かもしれない
+  return false if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
 
   # ここまでくれば安心
   return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
   return false if !systemRet "git branch -d \"#{tmpBranch}\""
   return false if !systemRet "git checkout #{rootBranch}"
-  
+
   return true
 end
 
@@ -107,21 +106,21 @@ def tryStashCommitSkip
     puts 'tmp is not found'
     return false
   end
-  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-progresstmp$/)[1]
-  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-progresstmp$/)[1]
-  
+  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
+
   # rebase --skip前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --skip')
   # rebase --continue後かもしれない
   return false if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-  
+  # rebase --abort後はスルー
+
   # ここまでくれば安心
   return false if !systemRet "git checkout \"#{rootBranch}\""
   return false if !systemRet "git branch -D \"#{tmpBranch}\"" # skipなのでtmpを捨てる
 
   return true
 end
-
 
 # --------------------------------------------------
 
@@ -131,16 +130,18 @@ def tryStashCommitAbort
     puts 'tmp is not found'
     return false
   end
-  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-progresstmp$/)[1]
-  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-progresstmp$/)[1]
+  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
 
   # rebase --abort前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
   # rebase --continue後かもしれない
   return false if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+  # rebase --skip後かもしれない
+  return false if systemRet "git same-branch \"#{tmpBranch}\" \"#{stashBranch}\""
   # 念の為
   return false if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{rootBranch}\""
-  
+
   # ここまでくれば安心
   return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{rootBranch}\""
   return false if !systemRet "git branch -d \"#{tmpBranch}\""
@@ -152,15 +153,21 @@ end
 # --------------------------------------------------
 
 def usage
-  puts '* not implemented(showUsage)'
+  print <<-EOS
+  git stash-commit [--to (index | branch name)]
+  git stash-commit --continue
+  git stash-commit --skip
+  git stash-commit --abort
+  EOS
 end
 
+# --------------------------------------------------
 
-def f(argv)
+def main(argv)
   hash=`git revision`
   branch=`git branch-name`
   title=`git title`
-  
+
   commitMessage = "WIP on #{branch}: #{hash} #{title}" # default
   to = nil
   continue = false
@@ -173,11 +180,18 @@ def f(argv)
     case argv[i]
     when '-m', '--message'
       i += 1
-      # FIXME : OutofRange
+      if i >= argv.length
+        usage
+        Kernel.exit false
+      end
       commitMessage = argv[i]
     when '--to'
       i += 1
       # TODO : バリエーション対応(コミットハッシュ | ブランチ名)
+      if i >= argv.length
+        usage
+        Kernel.exit false
+      end
       to = argv[i].to_i
     when '--continue'
       if argv.length != 1
@@ -205,7 +219,7 @@ def f(argv)
       usage
       Kernel.exit false
     end
-    
+
     i += 1
   end
 
@@ -223,23 +237,23 @@ def f(argv)
   end
   if _skip
     Kernel.exit false if !validateRebase
-    
+
     if tryStashCommitSkip
       puts 'success'
       return
     end
-    
+
     puts '* failed: stash-commit --skip'
     Kernel.exit false
   end
   if _abort
     Kernel.exit false if !validateRebase
-    
+
     if tryStashCommitAbort
       puts 'success'
       return
     end
-    
+
     puts '* failed: stash-commit --abort'
     Kernel.exit false
   end
@@ -254,18 +268,19 @@ def f(argv)
     puts 'not need'
     return
   end
-  
-  # 指定がある時
+
   if to != nil
+    # 指定がある時
     Kernel.exit false if !validateStashCommit branch
     if tryStashCommitGrow branch, to, commitMessage
       puts 'success'
       return
     end
-    
+
     puts '* failed: stash-commit to'
     Kernel.exit false
   else
+    # 指定がない時
     Kernel.exit false if !validateStashCommit branch
     MAX.times do |i|
       if tryStashCommit branch, i, commitMessage
@@ -279,4 +294,4 @@ def f(argv)
   end
 end
 
-f ARGV
+main ARGV
