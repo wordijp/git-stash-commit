@@ -28,7 +28,7 @@ def validateRebase
   return true if systemRet 'git rebase-in-progress'
   return true if getTmp != ''
   
-  puts 'rebase is not need'
+  puts 'rebase (--continue | --abort) is not need'
   return false
 end
 
@@ -43,33 +43,22 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitContinue(branch)
-  tmpBranch = getTmp
-  if tmpBranch == ''
-    puts 'tmp is not found'
-    return false
-  end
-  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-progresstmp$/)[1]
-  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-progresstmp$/)[1]
+def tryCommitTracked(stash, commitMessage)
+  return false if !systemRet "git checkout -b \"#{stash}\""
+  return false if !systemRet "git commit-tracked -m \"#{commitMessage}\""
 
-  # NOTE : rebase --continueの前と後、rebase --abort後の別ブランチの違いを吸収する
-  # rebase --continue前かもしれない
-  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --continue')
-  # NOTE : git rebase --abort後で別ブランチかもしれない
-  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
-
-  # ここまでくれば一安心
-  return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
-  return false if !systemRet "git branch -d \"#{tmpBranch}\""
-  return false if !systemRet "git checkout #{rootBranch}"
-  
   return true
 end
 
-# --------------------------------------------------
+def tryStashCommit(branch, no, commitMessage)
+  stash = stashName branch, no
+  return false if !tryCommitTracked stash, commitMessage
+  return false if !systemRet "git checkout #{branch}"
 
-# TODO : toへブランチを追加する
-def tryStashCommitTo(branch, to, commitMessage)
+  return true
+end
+
+def tryStashCommitGrow(branch, to, commitMessage)
   return true if tryStashCommit branch, to, commitMessage
   
   # 存在してるので、そのブランチへ追加する
@@ -87,34 +76,65 @@ def tryStashCommitTo(branch, to, commitMessage)
   return true
 end
 
-def tryCommitTracked(stash, commitMessage)
-  return false if !systemRet "git checkout -b \"#{stash}\""
-  return false if !systemRet "git commit-tracked -m \"#{commitMessage}\""
+# --------------------------------------------------
 
+def tryStashCommitContinue
+  tmpBranch = getTmp
+  if tmpBranch == ''
+    puts 'tmp is not found'
+    return false
+  end
+  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-progresstmp$/)[1]
+  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-progresstmp$/)[1]
+
+  # NOTE : rebase --continueの前と後、rebase --abort後の別ブランチの違いを吸収する
+  # rebase --continue前かもしれない
+  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --continue')
+  # git rebase --abort後で別ブランチかもしれない
+  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
+
+  # ここまでくれば安心
+  return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
+  return false if !systemRet "git branch -d \"#{tmpBranch}\""
+  return false if !systemRet "git checkout #{rootBranch}"
+  
   return true
 end
 
-
-# TODO : 実装
-def stashCommitContinue(branch, to)
-  return false if !systemRet 'git rebase --continue'
-  # TODO : 本流の番号取得
-end
+# --------------------------------------------------
 
 def stashCommitSkip(branch, to)
+  puts '* not implemented(showUsage)'
 end
 
-def stashCommitAbort(branch, to)
-  # TODO : tmpがあったら、tmpからreset HEAD~, checkout rootBranch, branch -d tmp
-end
 
-def tryStashCommit(branch, no, commitMessage)
-  stash = stashName branch, no
-  return false if !tryCommitTracked stash, commitMessage
-  return false if !systemRet "git checkout #{branch}"
+# --------------------------------------------------
+
+def tryStashCommitAbort
+  tmpBranch = getTmp
+  if tmpBranch == ''
+    puts 'tmp is not found'
+    return false
+  end
+  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-progresstmp$/)[1]
+  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-progresstmp$/)[1]
+
+  # rebase --abort前かもしれない
+  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
+  # rebase --continue後かもしれない
+  return false if systemRet "git parent-child \"#{tmpBranch}\" \"#{stashBranch}\""
+  # 念の為
+  return false if !systemRet "git parent-child \"#{tmpBranch}\" \"#{rootBranch}\""
+  
+  # ここまでくれば安心
+  return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{rootBranch}\""
+  return false if !systemRet "git branch -d \"#{tmpBranch}\""
+  return false if !systemRet 'git reset HEAD~'
 
   return true
 end
+
+# --------------------------------------------------
 
 def usage
   puts '* not implemented(showUsage)'
@@ -129,6 +149,7 @@ def f(argv)
   commitMessage = "WIP on #{branch}: #{hash} #{title}" # default
   to = nil
   continue = false
+  _abort = false
 
   # parse argv
   i = 0
@@ -148,6 +169,12 @@ def f(argv)
         Kernel.exit false
       end
       continue = true
+    when '--abort'
+      if argv.length != 1
+        usage
+        Kernel.exit false
+      end
+      _abort = true
     when 'help'
       usage
       Kernel.exit true
@@ -164,7 +191,7 @@ def f(argv)
   if continue
     Kernel.exit false if !validateRebase
 
-    if tryStashCommitContinue branch
+    if tryStashCommitContinue
       puts 'success'
       return
     end
@@ -172,6 +199,18 @@ def f(argv)
     puts '* failed: stash-commit --contine'
     Kernel.exit false
   end
+  if _abort
+    Kernel.exit false if !validateRebase
+    
+    if tryStashCommitAbort
+      puts 'success'
+      return
+    end
+    
+    puts '* failed: stash-commit --abort'
+    Kernel.exit false
+  end
+
 
   # 作業中のブランチがある?
   if getTmp != ''
@@ -187,7 +226,7 @@ def f(argv)
   # 指定がある時
   if to != nil
     Kernel.exit false if !validateStashCommit branch
-    if tryStashCommitTo branch, to, commitMessage
+    if tryStashCommitGrow branch, to, commitMessage
       puts 'success'
       return
     end
