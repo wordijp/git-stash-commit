@@ -19,16 +19,14 @@ end
 # --------------------------------------------------
 
 def getTmp
-  tmpBranch = `git stash-commit-list-all | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
-  puts 'tmp is not found' if tmpBranch == ''
-  return tmpBranch
+  `git stash-commit-list-all | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
 end
 
 def validateRebase
   return true if systemRet 'git rebase-in-progress'
   return true if getTmp != ''
   
-  puts 'rebase (--continue | --abort) is not need'
+  puts 'stash-commit (--continue | --skip | --abort) is not need'
   return false
 end
 
@@ -103,8 +101,25 @@ end
 
 # --------------------------------------------------
 
-def stashCommitSkip(branch, to)
-  puts '* not implemented(showUsage)'
+def tryStashCommitSkip
+  tmpBranch = getTmp
+  if tmpBranch == ''
+    puts 'tmp is not found'
+    return false
+  end
+  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-progresstmp$/)[1]
+  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-progresstmp$/)[1]
+  
+  # rebase --skip前かもしれない
+  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --skip')
+  # rebase --continue後かもしれない
+  return false if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+  
+  # ここまでくれば安心
+  return false if !systemRet "git checkout \"#{rootBranch}\""
+  return false if !systemRet "git branch -D \"#{tmpBranch}\"" # skipなのでtmpを捨てる
+
+  return true
 end
 
 
@@ -122,9 +137,9 @@ def tryStashCommitAbort
   # rebase --abort前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
   # rebase --continue後かもしれない
-  return false if systemRet "git parent-child \"#{tmpBranch}\" \"#{stashBranch}\""
+  return false if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
   # 念の為
-  return false if !systemRet "git parent-child \"#{tmpBranch}\" \"#{rootBranch}\""
+  return false if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{rootBranch}\""
   
   # ここまでくれば安心
   return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{rootBranch}\""
@@ -149,6 +164,7 @@ def f(argv)
   commitMessage = "WIP on #{branch}: #{hash} #{title}" # default
   to = nil
   continue = false
+  _skip = false
   _abort = false
 
   # parse argv
@@ -169,6 +185,12 @@ def f(argv)
         Kernel.exit false
       end
       continue = true
+    when '--skip'
+      if argv.length != 1
+        usage
+        Kernel.exit false
+      end
+      _skip = true
     when '--abort'
       if argv.length != 1
         usage
@@ -187,7 +209,7 @@ def f(argv)
     i += 1
   end
 
-  # rebase
+  # continue | skip | abort
   if continue
     Kernel.exit false if !validateRebase
 
@@ -197,6 +219,17 @@ def f(argv)
     end
 
     puts '* failed: stash-commit --contine'
+    Kernel.exit false
+  end
+  if _skip
+    Kernel.exit false if !validateRebase
+    
+    if tryStashCommitSkip
+      puts 'success'
+      return
+    end
+    
+    puts '* failed: stash-commit --skip'
     Kernel.exit false
   end
   if _abort
@@ -210,7 +243,6 @@ def f(argv)
     puts '* failed: stash-commit --abort'
     Kernel.exit false
   end
-
 
   # 作業中のブランチがある?
   if getTmp != ''
