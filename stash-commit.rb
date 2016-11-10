@@ -234,8 +234,7 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitAbort
-  tmpBranch = getTmp
+def tryStashCommitAbortTo(tmpBranch)
   stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
   rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
 
@@ -254,6 +253,32 @@ def tryStashCommitAbort
   return false if !systemRet 'git reset HEAD~'
 
   return true
+end
+
+def tryStashCommitAbortFrom(branch)
+  # tmpが無いので、rebase中の時のみ継続
+  return false if !systemRet 'git rebase-in-progress'
+
+  rootMatch = branch.match(/.+rebasing #{PREFIX}\/(.+)@.+\)$/)
+  return false if !rootMatch
+
+  rootBranch = rootMatch[1]
+
+  return false if !systemRet 'git rebase --abort'
+  
+  # ここまでくれば安心
+  return false if !systemRet "git checkout \"#{rootBranch}\""
+  
+  return true
+end
+
+def tryStashCommitAbort(branch)
+  tmpBranch = getTmp
+  if tmpBranch != ''
+    return tryStashCommitAbortTo tmpBranch
+  else
+    return tryStashCommitAbortFrom branch
+  end
 end
 
 # --------------------------------------------------
@@ -364,7 +389,7 @@ def main(argv)
   if _abort
     Kernel.exit false if !validateRebase
 
-    if tryStashCommitAbort
+    if tryStashCommitAbort branch
       puts 'success'
       return
     end
