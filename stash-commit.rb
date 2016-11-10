@@ -122,7 +122,15 @@ end
 # --------------------------------------------------
 
 def tryStashCommitFrom(branch, from)
+  stashBranch = stashName branch, from
+  baseHash = `git show-branch --merge-base "#{branch}" "#{stashBranch}" | tr -d '\n'`
+  return false if !systemRet "git rebase --onto \"#{branch}\" \"#{baseHash}\" \"#{stashBranch}\""
 
+  # ここまでくれば安心
+  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{branch}\""
+  return false if !systemRet "git branch -d \"#{stashBranch}\""
+
+  return true
 end
 
 # --------------------------------------------------
