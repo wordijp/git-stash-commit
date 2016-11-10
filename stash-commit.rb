@@ -284,6 +284,12 @@ end
 
 # --------------------------------------------------
 
+module Rebase
+  CONTINUE = '--continue'
+  SKIP     = '--skip'
+  ABORT    = '--abort'
+end
+
 def main(argv)
   hash=`git revision`
   branch=`git branch-name`
@@ -292,9 +298,7 @@ def main(argv)
   commitMessage = "WIP on #{branch}: #{hash} #{title}" # default
   to = nil
   from = nil
-  continue = false
-  _skip = false
-  _abort = false
+  rebase = nil
 
   # parse argv
   i = 0
@@ -326,19 +330,19 @@ def main(argv)
         usage
         Kernel.exit false
       end
-      continue = true
+      rebase = Rebase::CONTINUE
     when '--skip'
       if argv.length != 1
         usage
         Kernel.exit false
       end
-      _skip = true
+      rebase = Rebase::SKIP
     when '--abort'
       if argv.length != 1
         usage
         Kernel.exit false
       end
-      _abort = true
+      rebase = Rebase::ABORT
     when 'help'
       usage
       Kernel.exit true
@@ -353,37 +357,19 @@ def main(argv)
 
   # [rebase] --continue | --skip | --abort
   # --------------------------------------
-  if continue
+  if rebase != nil
     Kernel.exit false if !validateRebase
 
-    if tryStashCommitContinue branch
-      puts 'success'
-      return
+    case rebase
+    when Rebase::CONTINUE
+      return if tryStashCommitContinue branch
+    when Rebase::SKIP
+      return if tryStashCommitSkip branch
+    when Rebase::ABORT
+      return if tryStashCommitAbort branch
     end
 
-    puts '* failed: stash-commit --contine'
-    Kernel.exit false
-  end
-  if _skip
-    Kernel.exit false if !validateRebase
-
-    if tryStashCommitSkip branch
-      puts 'success'
-      return
-    end
-
-    puts '* failed: stash-commit --skip'
-    Kernel.exit false
-  end
-  if _abort
-    Kernel.exit false if !validateRebase
-
-    if tryStashCommitAbort branch
-      puts 'success'
-      return
-    end
-
-    puts '* failed: stash-commit --abort'
+    puts "* failed: stash-commit #{rebase}"
     Kernel.exit false
   end
 
@@ -393,10 +379,7 @@ def main(argv)
     Kernel.exit false if !validateFromTo from
     Kernel.exit false if !validateStashCommitFrom branch
 
-    if tryStashCommitFrom branch, from
-      puts 'success'
-      return
-    end
+    return if tryStashCommitFrom branch, from
 
     puts '* failed: stash-commit --from (index | name)'
     Kernel.exit false
@@ -404,21 +387,17 @@ def main(argv)
     # --to 指定がある時
     Kernel.exit false if !validateFromTo to
     Kernel.exit false if !validateStashCommitTo branch
-    if tryStashCommitToGrow branch, to, commitMessage
-      puts 'success'
-      return
-    end
+
+    return if tryStashCommitToGrow branch, to, commitMessage
 
     puts '* failed: stash-commit --to (index | name)'
     Kernel.exit false
   else
     # --to 指定がない時
     Kernel.exit false if !validateStashCommitTo branch
+
     MAX.times do |i|
-      if tryStashCommitTo branch, i, commitMessage
-        puts 'success'
-        return
-      end
+      return if tryStashCommitTo branch, i, commitMessage
     end
 
     puts '* failed: stash-commit branch is too many'
