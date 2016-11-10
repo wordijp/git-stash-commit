@@ -37,10 +37,11 @@ def validateFromTo(fromto)
 end
 
 def validateRebase
-  if getTmp == ''
-    puts 'tmp is not found'
-    return false
-  end
+  return true if getTmp != ''
+#  if getTmp == ''
+#    puts 'tmp is not found'
+#    return false
+#  end
   return true if systemRet 'git rebase-in-progress'
 
   puts 'stash-commit (--continue | --skip | --abort) is not need'
@@ -135,11 +136,10 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitContinue
-  tmpBranch = getTmp
+def tryStashCommitContinueTo(tmpBranch)
   stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
   rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
-
+  
   # rebase --continue前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --continue')
   # rebase --abort後で別ブランチかもしれない
@@ -153,6 +153,35 @@ def tryStashCommitContinue
   return false if !systemRet "git checkout \"#{rootBranch}\""
 
   return true
+end
+
+def tryStashCommitContinueFrom(branch)
+  # tmpが無いので、rebase中の時のみ継続
+  return false if !systemRet 'git rebase-in-progress'
+  
+  stashMatch = branch.match(/.+rebasing (#{PREFIX}\/.+)\)$/)
+  rootMatch = branch.match(/.+rebasing #{PREFIX}\/(.+)@.+\)$/)
+  return false if !stashMatch
+  
+  stashBranch = stashMatch[1]
+  rootBranch = rootMatch[1]
+  
+  return false if !systemRet 'git rebase --continue'
+  
+  # ここまでくれば安心
+  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{rootBranch}\""
+  return false if !systemRet "git branch -d \"#{stashBranch}\""
+
+  return true
+end
+
+def tryStashCommitContinue(branch)
+  tmpBranch = getTmp
+  if tmpBranch != ''
+    return tryStashCommitContinueTo tmpBranch
+  else
+    return tryStashCommitContinueFrom branch
+  end
 end
 
 # --------------------------------------------------
@@ -285,7 +314,7 @@ def main(argv)
   if continue
     Kernel.exit false if !validateRebase
 
-    if tryStashCommitContinue
+    if tryStashCommitContinue branch
       puts 'success'
       return
     end
