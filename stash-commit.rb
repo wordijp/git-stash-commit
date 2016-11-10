@@ -274,15 +274,47 @@ end
 
 def usage
   print <<-EOS
-  git stash-commit [--to (index | name)]
+  git stash-commit [--to (index | name)] [(-m | --message) commit message]
   git stash-commit --from (index | name)
   git stash-commit --continue
   git stash-commit --skip
   git stash-commit --abort
+  git stash-commit help
   EOS
 end
 
 # --------------------------------------------------
+
+class ArgvIterator
+  def initialize(argv)
+    @argv = argv
+    @index = 0
+  end
+  
+  def next?
+    @index < @argv.length
+  end
+  
+  def next
+    if @index < @argv.length
+      ret = @argv[@index]
+      @index += 1
+      return ret
+    else
+      puts '* error: argument is not enoufh'
+      usage
+      Kernel.exit false
+    end
+  end
+  
+  def rebaseMode
+    if @argv.length != 1
+      puts '* error: illegal argument'
+      usage
+      Kernel.exit false
+    end
+  end
+end
 
 module Rebase
   CONTINUE = '--continue'
@@ -301,58 +333,34 @@ def main(argv)
   rebase = nil
 
   # parse argv
-  i = 0
-  while i < argv.length do
-    case argv[i]
+  # ----------
+  itArgv = ArgvIterator.new(argv)
+  while itArgv.next? do
+    arg = itArgv.next
+    case arg
     when '-m', '--message'
-      i += 1
-      if i >= argv.length
-        usage
-        Kernel.exit false
-      end
-      commitMessage = argv[i]
+      commitMessage = itArgv.next
     when '--to'
-      i += 1
-      if i >= argv.length
-        usage
-        Kernel.exit false
-      end
-      to = argv[i]
+      to = itArgv.next
     when '--from'
-      i += 1
-      if i >= argv.length
-        usage
-        Kernel.exit false
-      end
-      from = argv[i]
+      from = itArgv.next
     when '--continue'
-      if argv.length != 1
-        usage
-        Kernel.exit false
-      end
+      itArgv.rebaseMode
       rebase = Rebase::CONTINUE
     when '--skip'
-      if argv.length != 1
-        usage
-        Kernel.exit false
-      end
+      itArgv.rebaseMode
       rebase = Rebase::SKIP
     when '--abort'
-      if argv.length != 1
-        usage
-        Kernel.exit false
-      end
+      itArgv.rebaseMode
       rebase = Rebase::ABORT
     when 'help'
       usage
       Kernel.exit true
     else
-      puts "unknown option:#{argv[i]}"
+      puts "* error: unknown option:#{arg}"
       usage
       Kernel.exit false
     end
-
-    i += 1
   end
 
   # [rebase] --continue | --skip | --abort
