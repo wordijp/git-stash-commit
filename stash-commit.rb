@@ -282,13 +282,22 @@ end
 
 def usage
   print <<-EOS
-  git stash-commit [--to (index | name)] [(-m | --message) commit message]
+usage)
+  git stash-commit [--to (index | name)] [-m <commit message>] [-a | -p]
+    options : --to              default: unused index
+              -m | --message    default: "WIP on <branch>: <hash> <title>"
+              -a | --all        default
+              -p | --patch
+    NOTE : --all   equal 'git commit --all'
+           --patch equal 'git commit --patch'
   git stash-commit --from (index | name)
   git stash-commit --continue
   git stash-commit --skip
   git stash-commit --abort
+  git stash-commit --rename <oldname> <newname>
+    NOTE : #{PREFIX}/<oldname>@to #{PREFIX}/<newname>@to
   git stash-commit help
-  EOS
+EOS
 end
 
 # --------------------------------------------------
