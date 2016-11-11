@@ -313,8 +313,13 @@ def tryStashCommitRename(branch, renameOld, renameNew)
 
   # ここまでくれば安心
   # rename処理
-  # TODO : 長い、複数行で書く
-  return false if !systemRet "git stash-commit-list-all | grep -E \"^.+#{renameOld}@.+$\" | awk '{old=$0; new=$0; sub(\"#{renameOld}\", \"#{renameNew}\", new); print old; print new;}' | xargs -L 2 git branch -m"
+  renameCmd = <<-EOS
+  git stash-commit-list-all | \
+    grep -E "^.+#{renameOld}@.+$" | \
+    awk '{old=$0; new=$0; sub("#{renameOld}", "#{renameNew}", new); print old; print new;}' | \
+    xargs -L 2 git branch -m
+  EOS
+  return false if !systemRet renameCmd
 
   return true
 end
