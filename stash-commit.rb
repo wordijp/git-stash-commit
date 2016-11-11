@@ -22,26 +22,34 @@ end
 
 # --------------------------------------------------
 
-def validateFromTo(fromto)
-  # 数値 or ブランチ名
-  if fromto == ''
-    puts 'target name is empty'
-    return false
-  end
-  if fromto.match(/#{TMP_SUFFIX}$/)
-    puts "/#{TMP_SUFFIX}$/ is reserved words"
-    return false
-  end
-
-  return true
-end
-
 def validateRebase
   return true if getTmp != ''
   return true if systemRet 'git rebase-in-progress'
 
   puts 'stash-commit (--continue | --skip | --abort) is not need'
   return false
+end
+
+def validateFromTo(fromto)
+  # 数値 or ブランチ名
+  if fromto == ''
+    puts 'target name is empty'
+    return false
+  end
+  if fromto.match(/^#{PREFIX}/)
+    puts "/^#{PREFIX}/ is reserved words"
+    return false
+  end
+  if fromto.match(/#{TMP_SUFFIX}$/)
+    puts "/#{TMP_SUFFIX}$/ is reserved words"
+    return false
+  end
+  if fromto.match(/@/)
+    puts '@ is used in delimiter'
+    return false
+  end
+
+  return true
 end
 
 def validateStashCommitFromTo(branch)
