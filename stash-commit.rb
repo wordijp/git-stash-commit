@@ -6,6 +6,7 @@ require 'helper.rb'
 MAX = 5
 PREFIX = 'stash-commit'
 TMP_SUFFIX = 'progresstmp'
+REMAIN_SUFFIX = 'patch-remain'
 
 def systemRet(cmd)
   Kernel.system(cmd)
@@ -54,6 +55,10 @@ def validateFromTo(fromto)
   end
   if fromto.match(/#{TMP_SUFFIX}$/)
     puts "/#{TMP_SUFFIX}$/ is reserved words"
+    return false
+  end
+  if fromto.match(/#{REMAIN_SUFFIX}$/)
+    puts "/#{REMAIN_SUFFIX}$/ is reserved words"
     return false
   end
   if fromto.match(/@/)
@@ -111,7 +116,7 @@ def tryCommitTracked(stash, commitMessage)
   return true
 end
 
-def tryStashCommitTo(branch, no, commitMessage)
+def tryStashCommitTo(branch, no, commitMessage, commit)
   stash = stashName branch, no
   return false if !tryCommitTracked stash, commitMessage
   return false if !systemRet "git checkout \"#{branch}\""
@@ -119,7 +124,9 @@ def tryStashCommitTo(branch, no, commitMessage)
   return true
 end
 
-def tryStashCommitToGrow(branch, to, commitMessage)
+def tryStashCommitToGrow(branch, to, commitMessage, commit)
+  # TODO ちゃんと、存在してるかを事前に調べて場合分けする
+
   return true if tryStashCommitTo branch, to, commitMessage
 
   # 存在してるので、そのブランチへ追加する
@@ -390,6 +397,11 @@ module Rebase
   ABORT    = '--abort'
 end
 
+module Commit
+  ALL   = '--all'
+  PATCH = '--patch'
+end
+
 def main(argv)
   hash=`git revision`
   branch=`git branch-name`
@@ -400,6 +412,7 @@ def main(argv)
   from = nil
   noReset = false
   rebase = nil
+  commit = Commit::ALL
   renameOld = nil
   renameNew = nil
 
@@ -417,6 +430,10 @@ def main(argv)
       from = itArgv.next
     when '--no-reset'
       noReset = true
+    when '-a', '--all'
+      commit = Commit::ALL
+    when '-p', '--patch'
+      commit = Commit::PATCH
     when '--continue'
       itArgv.rebaseMode
       rebase = Rebase::CONTINUE
@@ -482,7 +499,7 @@ def main(argv)
     # --to 指定がある時
     if validateFromTo to and
        validateStashCommitTo branch
-      return if tryStashCommitToGrow branch, to, commitMessage
+      return if tryStashCommitToGrow branch, to, commitMessage, commit
     end
 
     puts '* failed: stash-commit --to (index | name)'
@@ -491,7 +508,7 @@ def main(argv)
     # --to 指定がない時
     if validateStashCommitTo branch
       MAX.times do |i|
-        return if tryStashCommitTo branch, i, commitMessage
+        return if tryStashCommitTo branch, i, commitMessage, commit
       end
     end
 
