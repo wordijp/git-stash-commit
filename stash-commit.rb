@@ -109,35 +109,84 @@ end
 
 # --------------------------------------------------
 
-def tryCommitTracked(stash, commitMessage)
-  return false if !systemRet "git checkout -b \"#{stash}\""
-  return false if !systemRet "git commit-tracked -m \"#{commitMessage}\""
+def tryCommitAll(stashBranch, commitMessage)
+  return false if !systemRet "git checkout -b \"#{stashBranch}\""
+  return false if !systemRet "git commit --all -m \"#{commitMessage}\""
+
+  return true
+end
+
+def tryCommitPatch(stashBranch, commitMessage)
+  return false if !systemRet "git checkout -b \"#{stashBranch}\""
+  return false if !systemRet "git commit --patch -m \"#{commitMessage}\""
+
+  if `git changes-count` != '0'
+    return false if !systemRet "git checkout -b \"#{stashBranch}-#{REMAIN_SUFFIX}\""
+    return false if !systemRet "git commit --all -m \"patch-remain from #{stashBranch}\""
+  end
 
   return true
 end
 
 def tryStashCommitTo(branch, no, commitMessage, commit)
-  stash = stashName branch, no
-  return false if !tryCommitTracked stash, commitMessage
-  return false if !systemRet "git checkout \"#{branch}\""
+  stashBranch = stashName branch, no
+
+  case commit
+  when Commit::ALL
+    return false if !tryCommitAll stashBranch, commitMessage
+    return false if !systemRet "git checkout \"#{branch}\""
+  when Commit::PATCH
+    return false if !tryCommitPatch stashBranch, commitMessage
+    return false if !systemRet "git checkout \"#{branch}\""
+
+    remain = "#{stashBranch}-#{REMAIN_SUFFIX}"
+    if systemRet "git branch-exist \"#{remain}\""
+      # TODO : エラー時の検証がまだ
+      return false if !systemRet "git cherry-pick \"#{remain}\""
+      return false if !systemRet "git branch -D \"#{remain}\""
+      return false if !systemRet 'git reset HEAD~'
+    end
+  end
 
   return true
 end
 
 def tryStashCommitToGrow(branch, to, commitMessage, commit)
-  # TODO ちゃんと、存在してるかを事前に調べて場合分けする
-
-  return true if tryStashCommitTo branch, to, commitMessage
-
-  # 存在してるので、そのブランチへ追加する
-  toTmp = "#{to}-#{TMP_SUFFIX}"
-  tmpBranch = stashName branch, toTmp
   stashBranch = stashName branch, to
-  return false if !tryCommitTracked tmpBranch, commitMessage
-  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
-  return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
-  return false if !systemRet "git branch -d \"#{tmpBranch}\""
-  return false if !systemRet "git checkout \"#{branch}\""
+
+  if !systemRet "git branch-exist \"#{stashBranch}\""
+    # 新規作成
+    return false if !tryStashCommitTo branch, to, commitMessage, commit
+  else
+    # 存在してるので、そのブランチへ追加する
+    # 一端新規作成し
+    tmpBranch = stashName branch, "#{to}-#{TMP_SUFFIX}"
+    case commit
+    when Commit::ALL
+      return false if !tryCommitAll tmpBranch, commitMessage
+    when Commit::PATCH
+      return false if !tryCommitPatch tmpBranch, commitMessage
+    end
+
+    # rebaseで追加
+    return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
+    return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
+    return false if !systemRet "git branch -d \"#{tmpBranch}\""
+    return false if !systemRet "git checkout \"#{branch}\""
+
+    case commit
+    when Commit::ALL
+      # no-op
+    when Commit::PATCH
+      remain = "#{tmpBranch}-#{REMAIN_SUFFIX}"
+      if systemRet "git branch-exist \"#{remain}\""
+        # TODO : エラー次の検証がまだ
+        return false if !systemRet "git cherry-pick \"#{remain}\""
+        return false if !systemRet "git branch -D \"#{remain}\""
+        return false if !systemRet 'git reset HEAD~'
+      end
+    end
+  end
 
   return true
 end
