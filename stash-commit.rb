@@ -30,6 +30,18 @@ def validateRebase
   return false
 end
 
+def validateRename(branch, renameOld, renameNew)
+  return false if !validateStashCommitFromTo branch # 同じ
+  return false if !validateFromTo renameOld
+  return false if !validateFromTo renameNew
+  if renameOld == renameNew
+    puts "old:\"#{renameOld}\" new:\"#{renameNew}\" is same"
+    return false
+  end
+
+  return true
+end
+
 def validateFromTo(fromto)
   # 数値 or ブランチ名
   if fromto == ''
@@ -280,6 +292,35 @@ end
 
 # --------------------------------------------------
 
+def tryStashCommitRename(branch, renameOld, renameNew)
+  # 名前被りチェック
+  preCmd = "git stash-commit-list-all | sed -E 's/^#{PREFIX}\\/(.+)@.+$/\\1/g' | sort | uniq"
+
+  # renameOldの存在チェック
+  if `#{preCmd} | grep -w \"#{renameOld}\" | wc -l | tr -d '\n'` == '0'
+    puts "'#{renameOld}' name is not found"
+    return false
+  end
+
+  beforeCount = `#{preCmd} | wc -l | tr -d '\n'`
+  afterCount = `#{preCmd} | sed 's/#{renameOld}/#{renameNew}/' | sort | uniq | wc -l | tr -d '\n'`
+
+  # 数が減っている(= 名前が被ってる)
+  if beforeCount != afterCount
+    puts 'name is overlap'
+    return false
+  end
+
+  # ここまでくれば安心
+  # rename処理
+  # TODO : 長い、複数行で書く
+  return false if !systemRet "git stash-commit-list-all | grep -E \"^.+#{renameOld}@.+$\" | awk '{old=$0; new=$0; sub(\"#{renameOld}\", \"#{renameNew}\", new); print old; print new;}' | xargs -L 2 git branch -m"
+
+  return true
+end
+
+# --------------------------------------------------
+
 def usage
   print <<-EOS
 usage)
@@ -348,6 +389,8 @@ def main(argv)
   to = nil
   from = nil
   rebase = nil
+  renameOld = nil
+  renameNew = nil
 
   # parse argv
   # ----------
@@ -370,6 +413,9 @@ def main(argv)
     when '--abort'
       itArgv.rebaseMode
       rebase = Rebase::ABORT
+    when '--rename'
+      renameOld = itArgv.next
+      renameNew = itArgv.next
     when 'help'
       usage
       Kernel.exit true
@@ -395,6 +441,17 @@ def main(argv)
     end
 
     puts "* failed: stash-commit #{rebase}"
+    Kernel.exit false
+  end
+
+  # --rename
+  # --------
+  if renameOld != nil
+    if validateRename branch, renameOld, renameNew
+      return if tryStashCommitRename branch, renameOld, renameNew
+    end
+
+    puts '* failed: stash-commit --rename'
     Kernel.exit false
   end
 
