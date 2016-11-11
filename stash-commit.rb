@@ -307,11 +307,11 @@ class ArgvIterator
     @argv = argv
     @index = 0
   end
-  
+
   def next?
     @index < @argv.length
   end
-  
+
   def next
     if @index < @argv.length
       ret = @argv[@index]
@@ -323,7 +323,7 @@ class ArgvIterator
       Kernel.exit false
     end
   end
-  
+
   def rebaseMode
     if @argv.length != 1
       puts '* error: illegal argument'
@@ -383,15 +383,15 @@ def main(argv)
   # [rebase] --continue | --skip | --abort
   # --------------------------------------
   if rebase != nil
-    Kernel.exit false if !validateRebase
-
-    case rebase
-    when Rebase::CONTINUE
-      return if tryStashCommitContinue branch
-    when Rebase::SKIP
-      return if tryStashCommitSkip branch
-    when Rebase::ABORT
-      return if tryStashCommitAbort branch
+    if validateRebase
+      case rebase
+      when Rebase::CONTINUE
+        return if tryStashCommitContinue branch
+      when Rebase::SKIP
+        return if tryStashCommitSkip branch
+      when Rebase::ABORT
+        return if tryStashCommitAbort branch
+      end
     end
 
     puts "* failed: stash-commit #{rebase}"
@@ -401,28 +401,28 @@ def main(argv)
   # stash-commit --from | --to
   # --------------------------
   if from != nil
-    Kernel.exit false if !validateFromTo from
-    Kernel.exit false if !validateStashCommitFrom branch
-
-    return if tryStashCommitFrom branch, from
+    if validateFromTo from and
+       validateStashCommitFrom branch
+      return if tryStashCommitFrom branch, from
+    end
 
     puts '* failed: stash-commit --from (index | name)'
     Kernel.exit false
   elsif to != nil
     # --to 指定がある時
-    Kernel.exit false if !validateFromTo to
-    Kernel.exit false if !validateStashCommitTo branch
-
-    return if tryStashCommitToGrow branch, to, commitMessage
+    if validateFromTo to and
+       validateStashCommitTo branch
+      return if tryStashCommitToGrow branch, to, commitMessage
+    end
 
     puts '* failed: stash-commit --to (index | name)'
     Kernel.exit false
   else
     # --to 指定がない時
-    Kernel.exit false if !validateStashCommitTo branch
-
-    MAX.times do |i|
-      return if tryStashCommitTo branch, i, commitMessage
+    if validateStashCommitTo branch
+      MAX.times do |i|
+        return if tryStashCommitTo branch, i, commitMessage
+      end
     end
 
     puts '* failed: stash-commit branch is too many'
