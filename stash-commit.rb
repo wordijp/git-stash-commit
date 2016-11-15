@@ -6,7 +6,7 @@ require 'helper.rb'
 MAX = 5
 PREFIX = 'stash-commit'
 TMP_SUFFIX = 'progresstmp'
-REMAIN_SUFFIX = 'patch-remain'
+PATCH_REMAIN_SUFFIX = 'patch-remain'
 
 def systemRet(cmd)
   Kernel.system(cmd)
@@ -57,8 +57,8 @@ def validateFromTo(fromto)
     puts "/#{TMP_SUFFIX}$/ is reserved words"
     return false
   end
-  if fromto.match(/#{REMAIN_SUFFIX}$/)
-    puts "/#{REMAIN_SUFFIX}$/ is reserved words"
+  if fromto.match(/#{PATCH_REMAIN_SUFFIX}$/)
+    puts "/#{PATCH_REMAIN_SUFFIX}$/ is reserved words"
     return false
   end
   if fromto.match(/@/)
@@ -121,8 +121,12 @@ def tryCommitPatch(stashBranch, commitMessage)
   return false if !systemRet "git commit --patch -m \"#{commitMessage}\""
 
   if `git changes-count` != '0'
-    return false if !systemRet "git checkout -b \"#{stashBranch}-#{REMAIN_SUFFIX}\""
-    return false if !systemRet "git commit --all -m \"patch-remain from #{stashBranch}\""
+    return false if !systemRet "git checkout -b \"#{stashBranch}-#{PATCH_REMAIN_SUFFIX}\""
+    warningMsg = <<-EOS
+*** please close as it is ***
+because edit is meaningless, to be deleted after '--continue'.
+EOS
+    return false if !systemRet "git commit --all -m \"patch-remain from #{stashBranch}\n\n#{warningMsg}\""
   end
 
   return true
@@ -139,7 +143,7 @@ def tryStashCommitTo(branch, no, commitMessage, commit)
     return false if !tryCommitPatch stashBranch, commitMessage
     return false if !systemRet "git checkout \"#{branch}\""
 
-    remain = "#{stashBranch}-#{REMAIN_SUFFIX}"
+    remain = "#{stashBranch}-#{PATCH_REMAIN_SUFFIX}"
     if systemRet "git branch-exist \"#{remain}\""
       # TODO : エラー時の検証がまだ
       return false if !systemRet "git cherry-pick \"#{remain}\""
@@ -178,7 +182,7 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
     when Commit::ALL
       # no-op
     when Commit::PATCH
-      remain = "#{tmpBranch}-#{REMAIN_SUFFIX}"
+      remain = "#{tmpBranch}-#{PATCH_REMAIN_SUFFIX}"
       if systemRet "git branch-exist \"#{remain}\""
         # TODO : エラー次の検証がまだ
         return false if !systemRet "git cherry-pick \"#{remain}\""
