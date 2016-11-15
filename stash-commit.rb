@@ -17,15 +17,22 @@ def stashName(branch, no)
   "#{PREFIX}/#{branch}@#{no}"
 end
 
+# TODO : rename -> getProgressTmp
 def getTmp
   `git stash-commit-list-all | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
 end
+
+def getPatchRemain
+  `git stash-commit-list-all | grep -E '#{PATCH_REMAIN_SUFFIX}$' | head -n 1 | tr -d '\n'`
+end
+
 
 # --------------------------------------------------
 
 def validateRebase
   return true if getTmp != ''
   return true if systemRet 'git rebase-in-progress'
+  return true if getPatchRemain != ''
 
   puts 'stash-commit (--continue | --skip | --abort) is not need'
   return false
@@ -76,6 +83,10 @@ def validateStashCommitFromTo(branch)
   end
   if getTmp != ''
     puts 'find tmp branch, please fix it'
+    return false
+  end
+  if getPatchRemain != ''
+    puts 'find patch branch, please fix it'
     return false
   end
 
@@ -215,6 +226,28 @@ end
 
 # --------------------------------------------------
 
+def tryStashCommitContinuePatch(patchBranch)
+  stashBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
+  rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+
+  # cherry-pick --continue前かもしれない
+  return false if systemRet('git cherry-pick-in-progress') && !systemRet('git cherry-pick --continue')
+  # cherry-pick --abort後かもしれない
+  baseHash = `git show-branch --merge-base "#{rootBranch}" "#{patchBranch}" | tr -d '\n'`
+  if systemRet "git same-branch \"#{baseHash}\" \"#{rootBranch}\""
+    return false if !systemRet "git checkout \"#{rootBranch}\""
+    # NOTE : CONFLICTを一端abortした場合に来るはずなので、ここでは失敗するはず
+    #        (どちらにせよCONFLICTの解消が必要なので、失敗ならfalseを返す)
+    return false if !systemRet "git cherry-pick \"#{patchBranch}\""
+  end
+
+  # ここまでくれば安心
+  return false if !systemRet "git branch -D \"#{patchBranch}\""
+  return false if !systemRet 'git reset HEAD~'
+
+  return true
+end
+
 def tryStashCommitContinueTo(tmpBranch)
   stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
   rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
@@ -253,11 +286,17 @@ def tryStashCommitContinueFrom(branch)
 end
 
 def tryStashCommitContinue(branch)
-  tmpBranch = getTmp
-  if tmpBranch != ''
-    return tryStashCommitContinueTo tmpBranch
+  puts "tryStashCommitContinue"
+  patchBranch = getPatchRemain
+  if patchBranch != ''
+    return tryStashCommitContinuePatch patchBranch
   else
-    return tryStashCommitContinueFrom branch
+    tmpBranch = getTmp
+    if tmpBranch != ''
+      return tryStashCommitContinueTo tmpBranch
+    else
+      return tryStashCommitContinueFrom branch
+    end
   end
 end
 
@@ -299,11 +338,18 @@ def tryStashCommitSkipFrom(branch)
 end
 
 def tryStashCommitSkip(branch)
-  tmpBranch = getTmp
-  if tmpBranch != ''
-    return tryStashCommitSkipTo tmpBranch
+  patchBranch = getPatchRemain
+  if patchBranch != ''
+    # NOTE : cherry-pick --skipが無いのでそれに合わせる
+    puts "fatal: Option '--skip' by 'git stash-commit --patch' requires a value"
+    return false
   else
-    return tryStashCommitSkipFrom branch
+    tmpBranch = getTmp
+    if tmpBranch != ''
+      return tryStashCommitSkipTo tmpBranch
+    else
+      return tryStashCommitSkipFrom branch
+    end
   end
 end
 
@@ -346,11 +392,17 @@ def tryStashCommitAbortFrom(branch)
 end
 
 def tryStashCommitAbort(branch)
-  tmpBranch = getTmp
-  if tmpBranch != ''
-    return tryStashCommitAbortTo tmpBranch
+  patchBranch = getPatchRemain
+  if patchBranch != ''
+    puts 'not implemented'
+    return false
   else
-    return tryStashCommitAbortFrom branch
+    tmpBranch = getTmp
+    if tmpBranch != ''
+      return tryStashCommitAbortTo tmpBranch
+    else
+      return tryStashCommitAbortFrom branch
+    end
   end
 end
 
