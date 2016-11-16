@@ -81,6 +81,10 @@ def validateStashCommitFromTo(branch)
     puts 'now rebase in progress, please fix it'
     return false
   end
+  if systemRet 'git cherry-pick-in-progress'
+    puts 'now cherry-pick in progress, please fix it'
+    return false
+  end
   if getTmp != ''
     puts 'find tmp branch, please fix it'
     return false
@@ -227,7 +231,6 @@ end
 # --------------------------------------------------
 
 def tryStashCommitContinuePatch(patchBranch)
-  stashBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
   rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
 
   # cherry-pick --continue前かもしれない
@@ -287,13 +290,13 @@ end
 
 def tryStashCommitContinue(branch)
   puts "tryStashCommitContinue"
-  patchBranch = getPatchRemain
-  if patchBranch != ''
-    return tryStashCommitContinuePatch patchBranch
+  tmpBranch = getTmp
+  if tmpBranch != ''
+    return tryStashCommitContinueTo tmpBranch
   else
-    tmpBranch = getTmp
-    if tmpBranch != ''
-      return tryStashCommitContinueTo tmpBranch
+    patchBranch = getPatchRemain
+    if patchBranch != ''
+      return tryStashCommitContinuePatch patchBranch
     else
       return tryStashCommitContinueFrom branch
     end
@@ -394,8 +397,7 @@ end
 def tryStashCommitAbort(branch)
   patchBranch = getPatchRemain
   if patchBranch != ''
-    puts 'not implemented'
-    return false
+    return tryStashCommitAbortPatch patchBranch
   else
     tmpBranch = getTmp
     if tmpBranch != ''
@@ -612,6 +614,7 @@ def main(argv)
   else
     # --to 指定がない時
     if validateStashCommitTo branch
+      # TODO : 空いてるindexへのtryをしたら、以降は繰り返さない
       MAX.times do |i|
         return if tryStashCommitTo branch, i, commitMessage, commit
       end
