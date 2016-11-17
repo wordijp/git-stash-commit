@@ -358,20 +358,54 @@ end
 
 # --------------------------------------------------
 
+def tryStashCommitAbortPatch(patchBranch)
+  rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+  patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1] # NOTE : (xxx-progresstmp)-patch-remain
+
+  # rebase --abort前かもしれない
+  # NOTE : ToGrow内のrebase時conflictでここに来る
+  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
+  # cherry-pick --abort前かもしれない
+  return false if systemRet('git cherry-pick-in-progress') && !systemRet('git cherry-pick --abort')
+  # cherry-pick --continue後かもしれない
+  # TODO : rootBranchのhashを取得する方法へ変更
+  #        baseだと、commit後のpatch時に困る
+  baseHash = `git show-branch --merge-base "#{rootBranch}" "#{patchBranch}" | tr -d '\n'`
+  if !systemRet "git same-branch \"#{baseHash}\" \"#{rootBranch}\""
+    puts 'stop, new commit found, from starting stash-commit --patch'
+    return false
+  end
+  # rebase --continue | --skip後かもしれない
+  if !systemRet "git parent-child-branch \"#{patchBranch}\" \"#{patchParentBranch}\""
+    puts "stop, '#{PATCH_REMAIN_SUFFIX}' parent branch change found, from starging stash-commit --patch"
+    return false
+  end
+
+  # ここまでくれば安心
+  revision = `git revision \"#{rootBranch}\"`
+  return false if !systemRet "git rebase --onto \"#{rootBranch}\" \"#{patchParentBranch}~\" \"#{patchBranch}\""
+  return false if !systemRet "git rebase \"#{patchBranch}\" \"#{rootBranch}\""
+  return false if !systemRet "git branch -d \"#{patchParentBranch}\" \"#{patchBranch}\""
+  return false if !systemRet "git reset \"#{revision}\""
+
+  return true
+end
+
 def tryStashCommitAbortTo(tmpBranch)
   stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
   rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
 
   # rebase --abort前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
-  # rebase --continue後かもしれない
-  return false if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-  # rebase --skip後かもしれない
-  return false if systemRet "git same-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-  # 念の為
+#  # rebase --continue後かもしれない
+#  return false if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+#  # rebase --skip後かもしれない
+#  return false if systemRet "git same-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+  # --continue後 or --skip後かもしれない
   return false if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{rootBranch}\""
 
   # ここまでくれば安心
+  # TODO : rootBranchの前のcommit hashへのresetへ
   return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{rootBranch}\""
   return false if !systemRet "git branch -d \"#{tmpBranch}\""
   return false if !systemRet 'git reset HEAD~'
