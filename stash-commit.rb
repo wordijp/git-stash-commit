@@ -147,8 +147,8 @@ EOS
   return true
 end
 
-def tryStashCommitTo(branch, no, commitMessage, commit)
-  stashBranch = stashName branch, no
+def tryStashCommitTo(stashBranch, commitMessage, commit)
+  branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
 
   case commit
   when Commit::ALL
@@ -174,7 +174,7 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
 
   if !systemRet "git branch-exist \"#{stashBranch}\""
     # 新規作成
-    return false if !tryStashCommitTo branch, to, commitMessage, commit
+    return false if !tryStashCommitTo stashBranch, commitMessage, commit
   else
     # 存在してるので、そのブランチへ追加する
     # 一端新規作成し
@@ -642,9 +642,15 @@ def main(argv)
   else
     # --to 指定がない時
     if validateStashCommitTo branch
-      # TODO : 空いてるindexへのtryをしたら、以降は繰り返さない
       MAX.times do |i|
-        return if tryStashCommitTo branch, i, commitMessage, commit
+        stashBranch = stashName branch, i
+        if systemRet "git branch-exist \"#{stashBranch}\""
+          puts "\"#{stashBranch}\" is already exist"
+          next
+        end
+        
+        return if tryStashCommitTo stashBranch, commitMessage, commit
+        break
       end
     end
 
