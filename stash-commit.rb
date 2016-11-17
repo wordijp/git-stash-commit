@@ -125,15 +125,28 @@ end
 # --------------------------------------------------
 
 def tryCommitAll(stashBranch, commitMessage)
+  branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
   return false if !systemRet "git checkout -b \"#{stashBranch}\""
-  return false if !systemRet "git commit --all -m \"#{commitMessage}\""
+  if !systemRet "git commit --all -m \"#{commitMessage}\""
+    return false if !systemRet "git checkout \"#{branch}\""
+    return false if !systemRet "git branch -d \"#{stashBranch}\""
+
+    return false
+  end
 
   return true
 end
 
 def tryCommitPatch(stashBranch, commitMessage)
+  branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
   return false if !systemRet "git checkout -b \"#{stashBranch}\""
-  return false if !systemRet "git commit --patch -m \"#{commitMessage}\""
+  if !systemRet "git commit --patch -m \"#{commitMessage}\""
+    # キャンセル時ここに来る
+    return false if !systemRet "git checkout \"#{branch}\""
+    return false if !systemRet "git branch -d \"#{stashBranch}\""
+
+    return false
+  end
 
   if `git changes-count` != '0'
     return false if !systemRet "git checkout -b \"#{stashBranch}-#{PATCH_REMAIN_SUFFIX}\""
@@ -648,7 +661,7 @@ def main(argv)
           puts "\"#{stashBranch}\" is already exist"
           next
         end
-        
+
         return if tryStashCommitTo stashBranch, commitMessage, commit
         break
       end
