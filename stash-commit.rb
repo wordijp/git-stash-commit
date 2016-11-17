@@ -212,7 +212,7 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitFrom(branch, from, noReset)
+def tryStashCommitFrom(branch, from)
   stashBranch = stashName branch, from
   baseHash = `git show-branch --merge-base "#{branch}" "#{stashBranch}" | tr -d '\n'`
   return false if !systemRet "git rebase --onto \"#{branch}\" \"#{baseHash}\" \"#{stashBranch}\""
@@ -221,9 +221,7 @@ def tryStashCommitFrom(branch, from, noReset)
   revision = `git revision \"#{branch}\"`
   return false if !systemRet "git rebase \"#{stashBranch}\" \"#{branch}\""
   return false if !systemRet "git branch -d \"#{stashBranch}\""
-  if !noReset
-    return false if !systemRet "git reset \"#{revision}\""
-  end
+  return false if !systemRet "git reset \"#{revision}\""
 
   return true
 end
@@ -282,8 +280,10 @@ def tryStashCommitContinueFrom(branch)
   # ここまでくれば安心
   stashBranch = stashMatch[1]
   rootBranch = rootMatch[1]
+  revision = `git revision \"#{rootBranch}\"`
   return false if !systemRet "git rebase \"#{stashBranch}\" \"#{rootBranch}\""
   return false if !systemRet "git branch -d \"#{stashBranch}\""
+  return false if !systemRet "git reset \"#{revision}\""
 
   return true
 end
@@ -551,7 +551,6 @@ def main(argv)
   commitMessage = "WIP on #{branch}: #{hash} #{title}" # default
   to = nil
   from = nil
-  noReset = false
   rebase = nil
   commit = Commit::ALL
   renameOld = nil
@@ -569,8 +568,6 @@ def main(argv)
       to = itArgv.next
     when '--from'
       from = itArgv.next
-    when '--no-reset'
-      noReset = true
     when '-a', '--all'
       commit = Commit::ALL
     when '-p', '--patch'
@@ -631,7 +628,7 @@ def main(argv)
   if from != nil
     if validateFromTo from and
        validateStashCommitFrom branch
-      return if tryStashCommitFrom branch, from, noReset
+      return if tryStashCommitFrom branch, from
     end
 
     puts '* failed: stash-commit --from (index | name)'
