@@ -160,7 +160,6 @@ def tryStashCommitTo(branch, no, commitMessage, commit)
 
     remain = "#{stashBranch}-#{PATCH_REMAIN_SUFFIX}"
     if systemRet "git branch-exist \"#{remain}\""
-      # TODO : エラー時の検証がまだ
       return false if !systemRet "git cherry-pick \"#{remain}\""
       return false if !systemRet "git branch -D \"#{remain}\""
       return false if !systemRet 'git reset HEAD~'
@@ -199,7 +198,6 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
     when Commit::PATCH
       remain = "#{tmpBranch}-#{PATCH_REMAIN_SUFFIX}"
       if systemRet "git branch-exist \"#{remain}\""
-        # TODO : エラー次の検証がまだ
         return false if !systemRet "git cherry-pick \"#{remain}\""
         return false if !systemRet "git branch -D \"#{remain}\""
         return false if !systemRet 'git reset HEAD~'
@@ -289,7 +287,6 @@ def tryStashCommitContinueFrom(branch)
 end
 
 def tryStashCommitContinue(branch)
-  puts "tryStashCommitContinue"
   tmpBranch = getTmp
   if tmpBranch != ''
     return tryStashCommitContinueTo tmpBranch
@@ -405,10 +402,10 @@ def tryStashCommitAbortTo(tmpBranch)
   return false if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{rootBranch}\""
 
   # ここまでくれば安心
-  # TODO : rootBranchの前のcommit hashへのresetへ
+  revision = `git revision  \"#{rootBranch}\"`
   return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{rootBranch}\""
   return false if !systemRet "git branch -d \"#{tmpBranch}\""
-  return false if !systemRet 'git reset HEAD~'
+  return false if !systemRet "git reset \"#{revision}\""
 
   return true
 end
