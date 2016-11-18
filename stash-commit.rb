@@ -5,6 +5,7 @@ require 'helper.rb'
 
 MAX = 5
 PREFIX = 'stash-commit'
+# TODO : rename -> それぞれworkerXXX
 TMP_SUFFIX = 'progresstmp'
 PATCH_REMAIN_SUFFIX = 'patch-remain'
 BACKUP_SUFFIX = 'backup'
@@ -56,18 +57,6 @@ def validateRebase
   return false
 end
 
-def validateRename(branch, renameOld, renameNew)
-  return false if !validateStashCommitFromTo branch # 同じ
-  return false if !validateFromTo renameOld
-  return false if !validateFromTo renameNew
-  if renameOld == renameNew
-    puts "old:\"#{renameOld}\" new:\"#{renameNew}\" is same"
-    return false
-  end
-
-  return true
-end
-
 def validateFromTo(fromto)
   # 数値 or ブランチ名
   if fromto == ''
@@ -84,6 +73,10 @@ def validateFromTo(fromto)
   end
   if fromto.match(/#{PATCH_REMAIN_SUFFIX}$/)
     puts "/#{PATCH_REMAIN_SUFFIX}$/ is reserved words"
+    return false
+  end
+  if fromto.match(/#{BACKUP_SUFFIX}$/)
+    puts "/#{BACKUP_SUFFIX}$/ is reserved words"
     return false
   end
   if fromto.match(/@/)
@@ -120,6 +113,18 @@ def validateStashCommitFromTo(branch)
   return true
 end
 
+def validateRename(branch, renameOld, renameNew)
+  return false if !validateStashCommitFromTo branch # 同じ
+  return false if !validateFromTo renameOld
+  return false if !validateFromTo renameNew
+  if renameOld == renameNew
+    puts "old:\"#{renameOld}\" new:\"#{renameNew}\" is same"
+    return false
+  end
+
+  return true
+end
+
 def validateStashCommitFrom(branch)
   if `git changes-count` != '0'
     puts 'find editing files, please fix it'
@@ -148,7 +153,7 @@ def tryBackup(branch)
   return false if !systemRet "git checkout --detach \"#{backupBranch}\""
   msg = <<-EOS
 *** backup commit ***
-this is 'stash-commit --to' working backup commit
+'stash-commit --to' working backup commit
 EOS
   hash=`git revision \"#{branch}\"`
   return false if !systemRet "git commit --all -m \"backup from #{branch}: #{hash}\n\n#{msg}\""
@@ -189,8 +194,10 @@ def tryCommitPatch(stashBranch, commitMessage)
     remain = "#{stashBranch}-#{PATCH_REMAIN_SUFFIX}"
     return false if !systemRet "git checkout -b \"#{remain}\""
     warningMsg = <<-EOS
-*** please close as it is ***
-because edit is meaningless, to be deleted after '--continue'.
+*** patch remain ***
+'stash-commit --patch' working patch remain commit.
+
+please fix conflicts without '#{stashBranch}' contents
 EOS
     hash=`git revision \"#{stashBranch}\"`
     return false if !systemRet "git commit --all -m \"patch-remain from #{stashBranch}: #{hash}\n\n#{warningMsg}\""
@@ -200,7 +207,6 @@ EOS
 end
 
 def tryStashCommitTo(stashBranch, commitMessage, commit, reset=true, backup=true)
-  # TODO : abort用にbackupを作る
   branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
 
   if backup
