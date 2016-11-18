@@ -444,57 +444,33 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitAbortPatch(patchBranch)
-  puts 'not implemented'
-  return false
-  rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
-  patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1] # NOTE : (xxx-progresstmp)-patch-remain
-
-  # rebase --abort前かもしれない
-  # NOTE : ToGrow内のrebase時conflictでここに来る
-  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
-  # cherry-pick --continue後かもしれない
-  # TODO : rootBranchのhashを取得する方法へ変更
-  #        baseだと、commit後のpatch時に困る
-  baseHash = `git show-branch --merge-base "#{rootBranch}" "#{patchBranch}" | tr -d '\n'`
-  if !systemRet "git same-branch \"#{baseHash}\" \"#{rootBranch}\""
-    puts 'stop, new commit found, from starting stash-commit --patch'
-    return false
-  end
-  # rebase --continue | --skip後かもしれない
-  if !systemRet "git parent-child-branch \"#{patchBranch}\" \"#{patchParentBranch}\""
-    puts "stop, '#{PATCH_REMAIN_SUFFIX}' parent branch change found, from starging stash-commit --patch"
+def tryStashCommitAbortTo(tmpBranch, patchBranch)
+  backup = getBackup
+  if backup == ''
+    puts "stop, '#{BACKUP_SUFFIX}' is not found, from starting stash-commit --to"
     return false
   end
 
-  # ここまでくれば安心
-  revision = `git revision \"#{rootBranch}\"`
-  return false if !systemRet "git rebase --onto \"#{rootBranch}\" \"#{patchParentBranch}~\" \"#{patchBranch}\""
-  return false if !systemRet "git rebase \"#{patchBranch}\" \"#{rootBranch}\""
-  return false if !systemRet "git branch -d \"#{patchParentBranch}\" \"#{patchBranch}\""
-  return false if !systemRet "git reset \"#{revision}\""
-
-  return true
-end
-
-def tryStashCommitAbortTo(tmpBranch)
-  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
-  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
-
   # rebase --abort前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
-#  # rebase --continue後かもしれない
-#  return false if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-#  # rebase --skip後かもしれない
-#  return false if systemRet "git same-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-  # --continue後 or --skip後かもしれない
-  return false if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{rootBranch}\""
+
+  if patchBranch != ''
+    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    return false if !systemRet "git checkout \"#{rootBranch}\""
+    return false if !systemRet "git branch -D \"#{patchBranch}\""
+  end
+  if tmpBranch != ''
+    rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
+    return false if !systemRet "git checkout \"#{rootBranch}\""
+    return false if !systemRet "git branch -D \"#{tmpBranch}\""
+  end
 
   # ここまでくれば安心
-  revision = `git revision  \"#{rootBranch}\"`
-  return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{rootBranch}\""
-  return false if !systemRet "git branch -d \"#{tmpBranch}\""
-  return false if !systemRet "git reset \"#{revision}\""
+  rootBranch = backup.match(/^#{PREFIX}\/(.+)@#{BACKUP_SUFFIX}$/)[1]
+  puts "backup:'#{backup}' root:'#{rootBranch}'"
+  return false if !systemRet "git checkout \"#{rootBranch}\""
+  return false if !systemRet "git cherry-pick --no-commit \"#{backup}\""
+  return false if !systemRet 'git reset' # cancel 'git add'
 
   return true
 end
@@ -515,17 +491,19 @@ def tryStashCommitAbortFrom(branch)
 end
 
 def tryStashCommitAbort(branch)
+  tmpBranch = getTmp
   patchBranch = getPatchRemain
-  if patchBranch != ''
-    return tryStashCommitAbortPatch patchBranch
-  else
-    tmpBranch = getTmp
-    if tmpBranch != ''
-      return tryStashCommitAbortTo tmpBranch
-    else
-      return tryStashCommitAbortFrom branch
+  if tmpBranch != '' or patchBranch != ''
+    return false if !tryStashCommitAbortTo tmpBranch, patchBranch
+    backup = getBackup
+    if backup != ''
+      return false if !systemRet "git branch -D \"#{backup}\""
     end
+  else
+    return false if !tryStashCommitAbortFrom branch
   end
+
+  return true
 end
 
 # --------------------------------------------------
