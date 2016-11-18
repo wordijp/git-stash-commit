@@ -325,19 +325,40 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitSkipTo(tmpBranch)
-  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
-  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
-
+def tryStashCommitSkipTo(tmpBranch, patchBranch)
   # rebase --skip前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --skip')
-  # rebase --continue後かもしれない
-  return false if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-  # rebase --abort後はスルー
+
+  if patchBranch != ''
+    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    # rebase --continue後かもしれない
+    if systemRet "git parent-child-branch \"#{patchBranch}\" \"#{rootBranch}\""
+      puts "stop, '#{PATCH_REMAIN_SUFFIX}' rebase --continue found, from starting stash-commit --patch"
+      return false
+    end
+    # rebase --abort後はスルー
+  end
+  if tmpBranch != ''
+    stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+    # rebase --continue後かもしれない
+    if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+      puts "stop, '#{TMP_SUFFIX}' rebase --continue found, from starting stash-commit --to"
+      return false
+    end
+    # rebase --abort後はスルー
+  end
 
   # ここまでくれば安心
-  return false if !systemRet "git checkout \"#{rootBranch}\""
-  return false if !systemRet "git branch -D \"#{tmpBranch}\"" # skipなのでtmpを捨てる
+  if tmpBranch != ''
+    rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
+    return false if !systemRet "git checkout \"#{rootBranch}\""
+    return false if !systemRet "git branch -D \"#{tmpBranch}\"" # skipなので捨てる
+  end
+  if patchBranch != ''
+    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    return false if !systemRet "git checkout \"#{rootBranch}\""
+    return false if !systemRet "git branch -D \"#{patchBranch}\"" # skipなので捨てる
+  end
 
   return true
 end
@@ -361,19 +382,15 @@ def tryStashCommitSkipFrom(branch)
 end
 
 def tryStashCommitSkip(branch)
+  tmpBranch = getTmp
   patchBranch = getPatchRemain
-  if patchBranch != ''
-    # NOTE : cherry-pick --skipが無いのでそれに合わせる
-    puts "fatal: Option '--skip' by 'git stash-commit --patch' requires a value"
-    return false
+  if tmpBranch != '' or patchBranch != ''
+    return false if !tryStashCommitSkipTo tmpBranch, patchBranch
   else
-    tmpBranch = getTmp
-    if tmpBranch != ''
-      return tryStashCommitSkipTo tmpBranch
-    else
-      return tryStashCommitSkipFrom branch
-    end
+    return false if !tryStashCommitSkipFrom branch
   end
+
+  return true
 end
 
 # --------------------------------------------------
