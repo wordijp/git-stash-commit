@@ -81,10 +81,6 @@ def validateStashCommitFromTo(branch)
     puts 'now rebase in progress, please fix it'
     return false
   end
-  if systemRet 'git cherry-pick-in-progress'
-    puts 'now cherry-pick in progress, please fix it'
-    return false
-  end
   if getTmp != ''
     puts 'find tmp branch, please fix it'
     return false
@@ -128,6 +124,7 @@ def tryCommitAll(stashBranch, commitMessage)
   branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
   return false if !systemRet "git checkout -b \"#{stashBranch}\""
   if !systemRet "git commit --all -m \"#{commitMessage}\""
+    # allなので来ないけど、patch側とコードの統一
     return false if !systemRet "git checkout \"#{branch}\""
     return false if !systemRet "git branch -d \"#{stashBranch}\""
 
@@ -149,7 +146,8 @@ def tryCommitPatch(stashBranch, commitMessage)
   end
 
   if `git changes-count` != '0'
-    return false if !systemRet "git checkout -b \"#{stashBranch}-#{PATCH_REMAIN_SUFFIX}\""
+    remain = "#{stashBranch}-#{PATCH_REMAIN_SUFFIX}"
+    return false if !systemRet "git checkout -b \"#{remain}\""
     warningMsg = <<-EOS
 *** please close as it is ***
 because edit is meaningless, to be deleted after '--continue'.
@@ -160,7 +158,8 @@ EOS
   return true
 end
 
-def tryStashCommitTo(stashBranch, commitMessage, commit)
+def tryStashCommitTo(stashBranch, commitMessage, commit, reset=true)
+  # TODO : abort用にbackupを作る
   branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
 
   case commit
@@ -169,13 +168,21 @@ def tryStashCommitTo(stashBranch, commitMessage, commit)
     return false if !systemRet "git checkout \"#{branch}\""
   when Commit::PATCH
     return false if !tryCommitPatch stashBranch, commitMessage
-    return false if !systemRet "git checkout \"#{branch}\""
 
     remain = "#{stashBranch}-#{PATCH_REMAIN_SUFFIX}"
     if systemRet "git branch-exist \"#{remain}\""
-      return false if !systemRet "git cherry-pick \"#{remain}\""
-      return false if !systemRet "git branch -D \"#{remain}\""
-      return false if !systemRet 'git reset HEAD~'
+      return false if !systemRet "git rebase --onto \"#{branch}\" \"#{remain}~\" \"#{remain}\""
+
+      if reset
+        revision = `git revision \"#{branch}\"`
+        return false if !systemRet "git rebase \"#{remain}\" \"#{branch}\""
+        return false if !systemRet "git branch -d \"#{remain}\""
+        return false if !systemRet "git reset \"#{revision}\""
+      else
+        return false if !systemRet "git checkout \"#{branch}\""
+      end
+    else
+      return false if !systemRet "git checkout \"#{branch}\""
     end
   end
 
@@ -192,12 +199,7 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
     # 存在してるので、そのブランチへ追加する
     # 一端新規作成し
     tmpBranch = stashName branch, "#{to}-#{TMP_SUFFIX}"
-    case commit
-    when Commit::ALL
-      return false if !tryCommitAll tmpBranch, commitMessage
-    when Commit::PATCH
-      return false if !tryCommitPatch tmpBranch, commitMessage
-    end
+    return false if !tryStashCommitTo tmpBranch, commitMessage, commit, false
 
     # rebaseで追加
     return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
@@ -211,9 +213,10 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
     when Commit::PATCH
       remain = "#{tmpBranch}-#{PATCH_REMAIN_SUFFIX}"
       if systemRet "git branch-exist \"#{remain}\""
-        return false if !systemRet "git cherry-pick \"#{remain}\""
-        return false if !systemRet "git branch -D \"#{remain}\""
-        return false if !systemRet 'git reset HEAD~'
+        revision = `git revision \"#{branch}\"`
+        return false if !systemRet "git rebase \"#{remain}\" \"#{branch}\""
+        return false if !systemRet "git branch -d \"#{remain}\""
+        return false if !systemRet "git reset \"#{revision}\""
       end
     end
   end
@@ -369,14 +372,14 @@ end
 # --------------------------------------------------
 
 def tryStashCommitAbortPatch(patchBranch)
+  puts 'not implemented'
+  return false
   rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
   patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1] # NOTE : (xxx-progresstmp)-patch-remain
 
   # rebase --abort前かもしれない
   # NOTE : ToGrow内のrebase時conflictでここに来る
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
-  # cherry-pick --abort前かもしれない
-  return false if systemRet('git cherry-pick-in-progress') && !systemRet('git cherry-pick --abort')
   # cherry-pick --continue後かもしれない
   # TODO : rootBranchのhashを取得する方法へ変更
   #        baseだと、commit後のpatch時に困る
