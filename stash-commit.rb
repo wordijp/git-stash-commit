@@ -18,7 +18,6 @@ def stashName(branch, no)
   "#{PREFIX}/#{branch}@#{no}"
 end
 
-# TODO : rename -> getProgressTmp
 def getTmp
   `git stash-commit-list-all | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
 end
@@ -181,7 +180,8 @@ def tryCommitPatch(stashBranch, commitMessage)
 *** please close as it is ***
 because edit is meaningless, to be deleted after '--continue'.
 EOS
-    return false if !systemRet "git commit --all -m \"patch-remain from #{stashBranch}\n\n#{warningMsg}\""
+    hash=`git revision \"#{stashBranch}\"`
+    return false if !systemRet "git commit --all -m \"patch-remain from #{stashBranch}: #{hash}\n\n#{warningMsg}\""
   end
 
   return true
