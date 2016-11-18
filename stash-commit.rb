@@ -7,7 +7,7 @@ MAX = 5
 PREFIX = 'stash-commit'
 TMP_SUFFIX = 'progresstmp'
 PATCH_REMAIN_SUFFIX = 'patch-remain'
-BACKUP_SUFFIX = 'progressbackup'
+BACKUP_SUFFIX = 'backup'
 
 def systemRet(cmd)
   Kernel.system(cmd)
@@ -27,9 +27,23 @@ def getPatchRemain
 end
 
 def getBackup
-  `git stash-commit-list-all | grep -E '#{BACKUP_SUFFIX}$' | head -n 1 | tr -d '\n'`
+  `git stash-commit-list-all-ref | grep -E '#{BACKUP_SUFFIX}$' | head -n 1 | tr -d '\n'`
 end
 
+# --------------------------------------------------
+
+# detached branchをtargetへ作成/更新する
+def updateRef(branch, target = '')
+  if target == ''
+    target = 'HEAD'
+  end
+  return systemRet "git update-ref -m \"git stash-commit\" refs/#{branch} #{target}"
+end
+
+# detached branchを削除する
+def deleteRef(branch)
+  return systemRet "git update-ref -d refs/#{branch}"
+end
 
 # --------------------------------------------------
 
@@ -70,10 +84,6 @@ def validateFromTo(fromto)
   end
   if fromto.match(/#{PATCH_REMAIN_SUFFIX}$/)
     puts "/#{PATCH_REMAIN_SUFFIX}$/ is reserved words"
-    return false
-  end
-  if fromto.match(/#{BACKUP_SUFFIX}$/)
-    puts "/#{BACKUP_SUFFIX}$/ is reserved words"
     return false
   end
   if fromto.match(/@/)
@@ -134,13 +144,15 @@ end
 
 def tryBackup(branch)
   backupBranch = stashName branch, BACKUP_SUFFIX
-  return false if !systemRet "git checkout -b \"#{backupBranch}\""
+  return false if !updateRef backupBranch
+  return false if !systemRet "git checkout --detach \"#{backupBranch}\""
   msg = <<-EOS
 *** backup commit ***
 this is 'stash-commit --to' working backup commit
 EOS
   hash=`git revision \"#{branch}\"`
   return false if !systemRet "git commit --all -m \"backup from #{branch}: #{hash}\n\n#{msg}\""
+  return false if !updateRef backupBranch
   return false if !systemRet "git checkout \"#{branch}\""
   return false if !systemRet "git cherry-pick --no-commit \"#{backupBranch}\""
   return false if !systemRet 'git reset' # cancel 'git add'
@@ -220,7 +232,7 @@ def tryStashCommitTo(stashBranch, commitMessage, commit, reset=true, backup=true
   end
 
   if backup
-    return false if !systemRet "git branch -D \"#{getBackup}\""
+    return false if !deleteRef getBackup
   end
 
   return true
@@ -260,7 +272,7 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
     end
   end
 
-  return false if !systemRet "git branch -D \"#{getBackup}\""
+  return false if !deleteRef getBackup
 
   return true
 end
@@ -359,7 +371,7 @@ def tryStashCommitContinue(branch)
     return false if !tryStashCommitContinueTo tmpBranch, patchBranch
     backup = getBackup
     if backup != ''
-      return false if !systemRet "git branch -D \"#{backup}\""
+      return false if !deleteRef backup
     end
   else
     return false if !tryStashCommitContinueFrom branch
@@ -433,7 +445,7 @@ def tryStashCommitSkip(branch)
     return false if !tryStashCommitSkipTo tmpBranch, patchBranch
     backup = getBackup
     if backup != ''
-      return false if !systemRet "git branch -D \"#{backup}\""
+      return false if !deleteRef backup
     end
   else
     return false if !tryStashCommitSkipFrom branch
@@ -467,7 +479,6 @@ def tryStashCommitAbortTo(tmpBranch, patchBranch)
 
   # ここまでくれば安心
   rootBranch = backup.match(/^#{PREFIX}\/(.+)@#{BACKUP_SUFFIX}$/)[1]
-  puts "backup:'#{backup}' root:'#{rootBranch}'"
   return false if !systemRet "git checkout \"#{rootBranch}\""
   return false if !systemRet "git cherry-pick --no-commit \"#{backup}\""
   return false if !systemRet 'git reset' # cancel 'git add'
@@ -497,7 +508,7 @@ def tryStashCommitAbort(branch)
     return false if !tryStashCommitAbortTo tmpBranch, patchBranch
     backup = getBackup
     if backup != ''
-      return false if !systemRet "git branch -D \"#{backup}\""
+      return false if !deleteRef backup
     end
   else
     return false if !tryStashCommitAbortFrom branch
