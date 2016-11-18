@@ -7,6 +7,7 @@ MAX = 5
 PREFIX = 'stash-commit'
 TMP_SUFFIX = 'progresstmp'
 PATCH_REMAIN_SUFFIX = 'patch-remain'
+BACKUP_SUFFIX = 'progressbackup'
 
 def systemRet(cmd)
   Kernel.system(cmd)
@@ -24,6 +25,10 @@ end
 
 def getPatchRemain
   `git stash-commit-list-all | grep -E '#{PATCH_REMAIN_SUFFIX}$' | head -n 1 | tr -d '\n'`
+end
+
+def getBackup
+  `git stash-commit-list-all | grep -E '#{BACKUP_SUFFIX}$' | head -n 1 | tr -d '\n'`
 end
 
 
@@ -68,6 +73,10 @@ def validateFromTo(fromto)
     puts "/#{PATCH_REMAIN_SUFFIX}$/ is reserved words"
     return false
   end
+  if fromto.match(/#{BACKUP_SUFFIX}$/)
+    puts "/#{BACKUP_SUFFIX}$/ is reserved words"
+    return false
+  end
   if fromto.match(/@/)
     puts '@ is used in delimiter'
     return false
@@ -87,6 +96,10 @@ def validateStashCommitFromTo(branch)
   end
   if getPatchRemain != ''
     puts 'find patch branch, please fix it'
+    return false
+  end
+  if getBackup != ''
+    puts'find backup branch, please fix it'
     return false
   end
 
@@ -119,6 +132,22 @@ def validateStashCommitTo(branch)
 end
 
 # --------------------------------------------------
+
+def tryBackup(branch)
+  backupBranch = stashName branch, BACKUP_SUFFIX
+  return false if !systemRet "git checkout -b \"#{backupBranch}\""
+  msg = <<-EOS
+*** backup commit ***
+this is 'stash-commit --to' working backup commit
+EOS
+  hash=`git revision \"#{branch}\"`
+  return false if !systemRet "git commit --all -m \"backup from #{branch}: #{hash}\n\n#{msg}\""
+  return false if !systemRet "git checkout \"#{branch}\""
+  return false if !systemRet "git cherry-pick --no-commit \"#{backupBranch}\""
+  return false if !systemRet 'git reset' # cancel 'git add'
+
+  return true
+end
 
 def tryCommitAll(stashBranch, commitMessage)
   branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
@@ -158,9 +187,13 @@ EOS
   return true
 end
 
-def tryStashCommitTo(stashBranch, commitMessage, commit, reset=true)
+def tryStashCommitTo(stashBranch, commitMessage, commit, reset=true, backup=true)
   # TODO : abort用にbackupを作る
   branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
+
+  if backup
+    return false if !tryBackup branch
+  end
 
   case commit
   when Commit::ALL
@@ -186,20 +219,26 @@ def tryStashCommitTo(stashBranch, commitMessage, commit, reset=true)
     end
   end
 
+  if backup
+    return false if !systemRet "git branch -D \"#{getBackup}\""
+  end
+
   return true
 end
 
 def tryStashCommitToGrow(branch, to, commitMessage, commit)
   stashBranch = stashName branch, to
 
+  return false if !tryBackup branch
+
   if !systemRet "git branch-exist \"#{stashBranch}\""
     # 新規作成
-    return false if !tryStashCommitTo stashBranch, commitMessage, commit
+    return false if !tryStashCommitTo stashBranch, commitMessage, commit, true, false
   else
     # 存在してるので、そのブランチへ追加する
     # 一端新規作成し
     tmpBranch = stashName branch, "#{to}-#{TMP_SUFFIX}"
-    return false if !tryStashCommitTo tmpBranch, commitMessage, commit, false
+    return false if !tryStashCommitTo tmpBranch, commitMessage, commit, false, false
 
     # rebaseで追加
     return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
@@ -220,6 +259,8 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
       end
     end
   end
+
+  return false if !systemRet "git branch -D \"#{getBackup}\""
 
   return true
 end
@@ -316,6 +357,10 @@ def tryStashCommitContinue(branch)
   patchBranch = getPatchRemain
   if tmpBranch != '' or patchBranch != ''
     return false if !tryStashCommitContinueTo tmpBranch, patchBranch
+    backup = getBackup
+    if backup != ''
+      return false if !systemRet "git branch -D \"#{backup}\""
+    end
   else
     return false if !tryStashCommitContinueFrom branch
   end
@@ -386,6 +431,10 @@ def tryStashCommitSkip(branch)
   patchBranch = getPatchRemain
   if tmpBranch != '' or patchBranch != ''
     return false if !tryStashCommitSkipTo tmpBranch, patchBranch
+    backup = getBackup
+    if backup != ''
+      return false if !systemRet "git branch -D \"#{backup}\""
+    end
   else
     return false if !tryStashCommitSkipFrom branch
   end
