@@ -242,42 +242,51 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitContinuePatch(patchBranch)
-  rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+def tryStashCommitContinueTo(tmpBranch, patchBranch)
+  # rebase --continue前かもしれない
+  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --continue')
 
-  # cherry-pick --continue前かもしれない
-  return false if systemRet('git cherry-pick-in-progress') && !systemRet('git cherry-pick --continue')
-  # cherry-pick --abort後かもしれない
-  baseHash = `git show-branch --merge-base "#{rootBranch}" "#{patchBranch}" | tr -d '\n'`
-  if systemRet "git same-branch \"#{baseHash}\" \"#{rootBranch}\""
-    return false if !systemRet "git checkout \"#{rootBranch}\""
-    # NOTE : CONFLICTを一端abortした場合に来るはずなので、ここでは失敗するはず
-    #        (どちらにせよCONFLICTの解消が必要なので、失敗ならfalseを返す)
-    return false if !systemRet "git cherry-pick \"#{patchBranch}\""
+  if patchBranch != ''
+    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    # rebase --skip後かもしれない
+    if systemRet "git same-branch \"#{patchBranch}\" \"#{rootBranch}\""
+      puts "stop, '#{PATCH_REMAIN_SUFFIX}' rebase --skip found, from starting stash-commit --patch"
+      return false
+    end
+    # rebase --abort後かもしれない
+    if !systemRet "git parent-child-branch \"#{patchBranch}\" \"#{rootBranch}\""
+      return false if !systemRet "git rebase --onto \"#{rootBranch}\" \"#{patchBranch}~\" \"#{patchBranch}\""
+    end
+  end
+  if tmpBranch != ''
+    stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+    # rebase --skip後かもしれない
+    if systemRet "git same-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+      puts "stop, '#{TMP_SUFFIX}' rebase --skip found, from starting stash-commit --to"
+      return false
+    end
+    # rebase --abort後かもしれない
+    if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+      return false if !systemRet "git rebase --onto \"#{stashBranch}\" \"#{tmpBranch}~\" \"#{tmpBranch}\""
+    end
   end
 
   # ここまでくれば安心
-  return false if !systemRet "git branch -D \"#{patchBranch}\""
-  return false if !systemRet 'git reset HEAD~'
-
-  return true
-end
-
-def tryStashCommitContinueTo(tmpBranch)
-  stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
-  rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
-
-  # rebase --continue前かもしれない
-  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --continue')
-  # rebase --abort後で別ブランチかもしれない
-  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
-  # rebase --skip後かもしれない
-  return false if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-
-  # ここまでくれば安心
-  return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
-  return false if !systemRet "git branch -d \"#{tmpBranch}\""
-  return false if !systemRet "git checkout \"#{rootBranch}\""
+  if tmpBranch != ''
+    rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
+    stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+    return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
+    return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
+    return false if !systemRet "git branch -d \"#{tmpBranch}\""
+    return false if !systemRet "git checkout \"#{rootBranch}\""
+  end
+  if patchBranch != ''
+    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    revision = `git revision \"#{rootBranch}\"`
+    return false if !systemRet "git rebase  \"#{patchBranch}\" \"#{rootBranch}\""
+    return false if !systemRet "git branch -d \"#{patchBranch}\""
+    return false if !systemRet "git reset \"#{revision}\""
+  end
 
   return true
 end
@@ -304,16 +313,14 @@ end
 
 def tryStashCommitContinue(branch)
   tmpBranch = getTmp
-  if tmpBranch != ''
-    return tryStashCommitContinueTo tmpBranch
+  patchBranch = getPatchRemain
+  if tmpBranch != '' or patchBranch != ''
+    return false if !tryStashCommitContinueTo tmpBranch, patchBranch
   else
-    patchBranch = getPatchRemain
-    if patchBranch != ''
-      return tryStashCommitContinuePatch patchBranch
-    else
-      return tryStashCommitContinueFrom branch
-    end
+    return false if !tryStashCommitContinueFrom branch
   end
+
+  return true
 end
 
 # --------------------------------------------------
