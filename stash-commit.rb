@@ -44,6 +44,18 @@ def updateRef(branch, target = '')
   return systemRet "git update-ref -m \"git stash-commit\" refs/#{branch} #{target}"
 end
 
+# branchをdetached branchへ
+def toRef(branch)
+  return false if !updateRef branch, branch
+  if `git branch-name` == branch
+    # 削除の為の切り替え
+    return false if !systemRet "git checkout --detach \"#{branch}\""
+  end
+  return false if !systemRet "git branch -D \"#{branch}\""
+
+  return true
+end
+
 # detached branchを削除する
 def deleteRef(branch)
   return systemRet "git update-ref -d refs/#{branch}"
@@ -270,13 +282,13 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
     # 存在してるので、そのブランチへ追加する
     # 一端新規作成し
     tmpBranch = stashName branch, "#{to}-#{TMP_SUFFIX}"
-    return false if !tryStashCommitTo tmpBranch, commitMessage, commit, false, false
+    if !tryStashCommitTo tmpBranch, commitMessage, commit, false, false
+      toRef tmpBranch if systemRet "git branch-exist \"#{tmpBranch}\""
+      return false
+    end
 
-    # XXX : 冗長
-    # tmpBranchをdetach branch化
-    return false if !systemRet "git checkout \"#{tmpBranch}\""
-    return false if !updateRef tmpBranch
-    return false if !systemRet "git branch -D \"#{tmpBranch}\""
+    # tmpBranchをdetached branch化
+    return false if !toRef tmpBranch
 
     # rebaseで追加
     return false if !rebaseRef stashBranch, tmpBranch
