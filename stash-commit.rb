@@ -3,6 +3,9 @@
 $:.unshift File.dirname(__FILE__)
 require 'helper.rb'
 
+# XXX : detach branchと通常のbranchが別々のコマンドの為、ややこしい
+# XXX : gitconfigのaliasを利用している為、密結合
+
 MAX = 5
 PREFIX = 'stash-commit'
 # TODO : rename -> それぞれworkerXXX
@@ -20,7 +23,7 @@ def stashName(branch, no)
 end
 
 def getTmp
-  `git stash-commit-list-all | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
+  `git stash-commit-list-all-ref | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
 end
 
 def getPatchRemain
@@ -269,10 +272,16 @@ def tryStashCommitToGrow(branch, to, commitMessage, commit)
     tmpBranch = stashName branch, "#{to}-#{TMP_SUFFIX}"
     return false if !tryStashCommitTo tmpBranch, commitMessage, commit, false, false
 
+    # XXX : 冗長
+    # tmpBranchをdetach branch化
+    return false if !systemRet "git checkout \"#{tmpBranch}\""
+    return false if !updateRef tmpBranch
+    return false if !systemRet "git branch -D \"#{tmpBranch}\""
+
     # rebaseで追加
-    return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
+    return false if !rebaseRef stashBranch, tmpBranch
     return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
-    return false if !systemRet "git branch -d \"#{tmpBranch}\""
+    return false if !deleteRef tmpBranch
     return false if !systemRet "git checkout \"#{branch}\""
 
     case commit
@@ -337,7 +346,7 @@ def tryStashCommitContinueTo(tmpBranch, patchBranch)
     end
     # rebase --abort後かもしれない
     if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-      return false if !systemRet "git rebase --onto \"#{stashBranch}\" \"#{tmpBranch}~\" \"#{tmpBranch}\""
+      return false if !rebaseOntoRef stashBranch, "#{tmpBranch}~", tmpBranch
     end
   end
 
@@ -345,9 +354,9 @@ def tryStashCommitContinueTo(tmpBranch, patchBranch)
   if tmpBranch != ''
     rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
     stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
-    return false if !systemRet "git rebase \"#{stashBranch}\" \"#{tmpBranch}\""
+    return false if !rebaseRef stashBranch, tmpBranch
     return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
-    return false if !systemRet "git branch -d \"#{tmpBranch}\""
+    return false if !deleteRef tmpBranch
     return false if !systemRet "git checkout \"#{rootBranch}\""
   end
   if patchBranch != ''
@@ -426,7 +435,7 @@ def tryStashCommitSkipTo(tmpBranch, patchBranch)
   if tmpBranch != ''
     rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
     return false if !systemRet "git checkout \"#{rootBranch}\""
-    return false if !systemRet "git branch -D \"#{tmpBranch}\"" # skipなので捨てる
+    return false if !deleteRef tmpBranch # skipなので捨てる
   end
   if patchBranch != ''
     rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
@@ -491,7 +500,7 @@ def tryStashCommitAbortTo(tmpBranch, patchBranch)
   if tmpBranch != ''
     rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
     return false if !systemRet "git checkout \"#{rootBranch}\""
-    return false if !systemRet "git branch -D \"#{tmpBranch}\""
+    return false if !deleteRef tmpBranch
   end
 
   # ここまでくれば安心
