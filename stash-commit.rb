@@ -3,8 +3,9 @@
 $:.unshift File.dirname(__FILE__)
 require 'helper.rb'
 
-# XXX : detach branchと通常のbranchが別々のコマンドの為、ややこしい
 # XXX : gitconfigのaliasを利用している為、密結合
+# FIXME : backupが消えない時がある
+# FIXME : 途中で強制終了した際、ブランチが破壊される事がある
 
 MAX = 5
 PREFIX = 'stash-commit'
@@ -451,8 +452,11 @@ def tryStashCommitSkipTo(tmpBranch, patchBranch)
   end
   if patchBranch != ''
     rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
     return false if !systemRet "git checkout \"#{rootBranch}\""
     return false if !deleteRef patchBranch # skipなので捨てる
+    # XXX : どちらか失敗時、標準エラー出力がユーザーに見える
+    systemRet("git branch -D \"#{patchParentBranch}\"") or deleteRef patchParentBranch
   end
 
   return true
@@ -506,13 +510,16 @@ def tryStashCommitAbortTo(tmpBranch, patchBranch)
 
   if patchBranch != ''
     rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
     return false if !systemRet "git checkout \"#{rootBranch}\""
     return false if !deleteRef patchBranch
+    # XXX : どちらか失敗時、標準エラー出力がユーザーに見える
+    return false if !systemRet("git branch -D \"#{patchParentBranch}\"") and !deleteRef patchParentBranch
   end
   if tmpBranch != ''
     rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
     return false if !systemRet "git checkout \"#{rootBranch}\""
-    return false if !deleteRef tmpBranch
+    deleteRef tmpBranch # もしかしたらpatchParentBranchとして削除済み
   end
 
   # ここまでくれば安心
