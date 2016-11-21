@@ -4,12 +4,10 @@ $:.unshift File.dirname(__FILE__)
 require 'helper.rb'
 
 # XXX : gitconfigのaliasを利用している為、密結合
-# FIXME : backupが消えない時がある
 # FIXME : 途中で強制終了した際、ブランチが破壊される事がある
 
 MAX = 5
 PREFIX = 'stash-commit'
-# TODO : rename -> それぞれworkerXXX
 TMP_SUFFIX = 'progresstmp'
 PATCH_REMAIN_SUFFIX = 'patch-remain'
 BACKUP_SUFFIX = 'backup'
@@ -211,6 +209,7 @@ def tryCommitPatch(stashBranch, commitMessage)
     # キャンセル時ここに来る
     return false if !systemRet "git checkout \"#{branch}\""
     return false if !systemRet "git branch -d \"#{stashBranch}\""
+    return false if !deleteRef getBackup
 
     return false
   end
@@ -586,11 +585,11 @@ def tryStashCommitRename(branch, renameOld, renameNew)
   # ここまでくれば安心
   # rename処理
   renameCmd = <<-EOS
-  git stash-commit-list-all | \
-    grep -E "^.+#{renameOld}@.+$" | \
-    awk '{old=$0; new=$0; sub("#{renameOld}", "#{renameNew}", new); print old; print new;}' | \
-    xargs -L 2 git branch -m
-  EOS
+git stash-commit-list-all | \
+  grep -E "^.+#{renameOld}@.+$" | \
+  awk '{old=$0; new=$0; sub("#{renameOld}", "#{renameNew}", new); print old; print new;}' | \
+  xargs -L 2 git branch -m
+EOS
   return false if !systemRet renameCmd
 
   return true
