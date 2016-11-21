@@ -454,8 +454,11 @@ def tryStashCommitSkipTo(tmpBranch, patchBranch)
     patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
     return false if !systemRet "git checkout \"#{rootBranch}\""
     return false if !deleteRef patchBranch # skipなので捨てる
-    # XXX : どちらか失敗時、標準エラー出力がユーザーに見える
-    systemRet("git branch -D \"#{patchParentBranch}\"") or deleteRef patchParentBranch
+    if systemRet "git branch-exist \"#{patchParentBranch}\""
+      return false if !systemRet("git branch -D \"#{patchParentBranch}\"")
+    else
+      deleteRef patchParentBranch # もしかしたらtmpBranchとして削除済み
+    end
   end
 
   return true
@@ -507,18 +510,21 @@ def tryStashCommitAbortTo(tmpBranch, patchBranch)
   # rebase --abort前かもしれない
   return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
 
+  if tmpBranch != ''
+    rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
+    return false if !systemRet "git checkout \"#{rootBranch}\""
+    return false if !deleteRef tmpBranch
+  end
   if patchBranch != ''
     rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
     patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
     return false if !systemRet "git checkout \"#{rootBranch}\""
     return false if !deleteRef patchBranch
-    # XXX : どちらか失敗時、標準エラー出力がユーザーに見える
-    return false if !systemRet("git branch -D \"#{patchParentBranch}\"") and !deleteRef patchParentBranch
-  end
-  if tmpBranch != ''
-    rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
-    return false if !systemRet "git checkout \"#{rootBranch}\""
-    deleteRef tmpBranch # もしかしたらpatchParentBranchとして削除済み
+    if systemRet "git branch-exist \"#{patchParentBranch}\""
+      return false if !systemRet("git branch -D \"#{patchParentBranch}\"")
+    else
+      deleteRef patchParentBranch # もしかしたらtmpBranchとして削除済み
+    end
   end
 
   # ここまでくれば安心
