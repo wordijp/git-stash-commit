@@ -6,6 +6,11 @@ require 'branch.rb'
 require 'command.rb'
 require 'define.rb'
 
+if !Cmd::gitdirExist?
+  puts 'git dir is not found'
+  Kernel.exit false
+end
+
 # XXX : gitconfigのaliasを利用している為、密結合
 # FIXME : 途中で強制終了した際、ブランチが破壊される事がある
 
