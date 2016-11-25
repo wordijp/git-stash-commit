@@ -68,11 +68,11 @@ class Branch
   end
   def rebase(upstream)
     puts "[#{@name}]: git rebase \"#{upstream}\""
-    Cmd::exec "git rebase \"#{upstream}\" \"#{@name}\""
+    Cmd::execForRebase @name, "git rebase \"#{upstream}\" \"#{@name}\""
   end
   def rebaseOnto(newbase, upstream)
     puts "[#{@name}]: git rebase --onto \"#{newbase}\" \"#{upstream}\" <SELF>"
-    Cmd::exec "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{@name}\""
+    Cmd::execForRebase @name, "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{@name}\""
   end
   def reset(target='')
     if target != ''
@@ -123,12 +123,11 @@ class DetachBranch
   end
   def rebase(upstream)
     puts "[#{@name}]: git rebase \"#{upstream}\""
-    # TODO : CONFLICT時、stash-commit --contiueのメッセージへ置き換える
-    Cmd::exec "git rebase \"#{upstream}\" \"#{@name}\" --exec \"git update-ref refs/#{@name} HEAD\""
+    Cmd::execForRebase @name, "git rebase \"#{upstream}\" \"#{@name}\" --exec \"git update-ref refs/#{@name} HEAD\""
   end
   def rebaseOnto(newbase, upstream)
     puts "[#{@name}]: git rebase --onto \"#{newbase}\" \"#{upstream}\" <SELF>"
-    Cmd::exec "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{@name}\" --exec \"git update-ref refs/#{@name} HEAD\""
+    Cmd::execForRebase @name, "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{@name}\" --exec \"git update-ref refs/#{@name} HEAD\""
   end
   def reset(target='')
     if target != ''
