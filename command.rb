@@ -67,8 +67,15 @@ module Cmd
   # ----------------
   # stash-commit ---
   # stash-commmitのbranch一覧
-  def stashCommitListAll
-    `git branch | sed -E 's/^\\*/ /' | awk '{print $1}' | grep -E '^#{PREFIX}/'`
+  def listup(_branchName, all)
+    preCmd = "git branch | sed -E 's/^\\*/ /' | awk '{print $1}' | grep -E '^#{PREFIX}/'"
+    if all
+      print `#{preCmd}`
+    else
+      # グループ表示
+      rootBranch = _branchName.match(/^(#{PREFIX}\/)?(.+?)(@.+)?$/)[2]
+      print `#{preCmd} | grep "#{rootBranch}"`
+    end
   end
   def getTmp
     findFirstCommitStashRef(){|line| line.match(/#{TMP_SUFFIX}$/)}

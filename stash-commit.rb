@@ -516,6 +516,9 @@ usage)
   git stash-commit --abort
   git stash-commit --rename <oldname> <newname>
     NOTE : #{PREFIX}/<oldname>@to #{PREFIX}/<newname>@to
+  git stash-commit -l [-a]
+    options : -l | --list       listup stash-commit branch, in this group
+              -a | --all        listup stash-commit branch all
   git stash-commit help
   git stash-commit <any args> [-d]
     options : -d | --debug      debug mode, show backtrace
@@ -573,6 +576,9 @@ def main(argv)
   renameOld = nil
   renameNew = nil
 
+  listup = false
+  listupAll = false
+
   # parse argv
   # ----------
   itArgv = ArgvIterator.new(argv)
@@ -587,6 +593,7 @@ def main(argv)
       from = itArgv.next
     when '-a', '--all'
       commit = Commit::ALL
+      listupAll = true
     when '-p', '--patch'
       commit = Commit::PATCH
     when '--continue'
@@ -598,6 +605,8 @@ def main(argv)
     when '--rename'
       renameOld = itArgv.next
       renameNew = itArgv.next
+    when '-l', '--list'
+      listup = true
     when 'help'
       usage
       Kernel.exit true
@@ -608,6 +617,12 @@ def main(argv)
       usage
       raise
     end
+  end
+
+  # --list [--all]
+  if listup
+    Cmd::listup branch, listupAll
+    Kernel.exit true
   end
 
   # --continue | --skip | --abort
