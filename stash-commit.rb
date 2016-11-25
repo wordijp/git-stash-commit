@@ -610,8 +610,8 @@ def main(argv)
     end
   end
 
-  # [rebase] --continue | --skip | --abort
-  # --------------------------------------
+  # --continue | --skip | --abort
+  # -----------------------------
   if rebase != nil
     begin
       raise if !validateRebase
@@ -643,8 +643,8 @@ def main(argv)
     end
   end
 
-  # stash-commit --from | --to
-  # --------------------------
+  # --from | --to
+  # -------------
   if from != nil
     begin
       raise if !validateFromTo from or !validateStashCommitFrom branch

@@ -17,7 +17,7 @@ module BranchFactory
       nil
     end
   end
-  
+
 end
 
 module BranchCommon
@@ -45,14 +45,14 @@ module BranchCommon
     checkout
     Cmd::exec "git cherry-pick --no-commit \"#{target}\""
   end
- 
+
   attr_reader :name
 end
 
 # 通常ブランチ
 class Branch
   include BranchCommon
-  
+
   def checkout
     Cmd::execQuiet "git checkout \"#{@name}\""
   end
