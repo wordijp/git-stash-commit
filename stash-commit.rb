@@ -2,79 +2,33 @@
 
 $:.unshift File.dirname(__FILE__)
 require 'helper.rb'
+require 'branch.rb'
+require 'command.rb'
+require 'define.rb'
+
+if !Cmd::gitdirExist?
+  puts 'git dir is not found'
+  Kernel.exit false
+end
 
 # XXX : gitconfigのaliasを利用している為、密結合
 # FIXME : 途中で強制終了した際、ブランチが破壊される事がある
 
 MAX = 5
-PREFIX = 'stash-commit'
-TMP_SUFFIX = 'progresstmp'
-PATCH_REMAIN_SUFFIX = 'patch-remain'
-BACKUP_SUFFIX = 'backup'
 
-def systemRet(cmd)
-  Kernel.system(cmd)
-  $?.success?
-end
-
-def stashName(branch, no)
-  "#{PREFIX}/#{branch}@#{no}"
-end
-
-def getTmp
-  `git stash-commit-list-all-ref | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
-end
-
-def getPatchRemain
-  `git stash-commit-list-all-ref | grep -E '#{PATCH_REMAIN_SUFFIX}$' | head -n 1 | tr -d '\n'`
-end
-
-def getBackup
-  `git stash-commit-list-all-ref | grep -E '#{BACKUP_SUFFIX}$' | head -n 1 | tr -d '\n'`
-end
-
-# --------------------------------------------------
-
-# detached branchをtargetへ作成/更新する
-def updateRef(branch, target = '')
-  if target == ''
-    target = 'HEAD'
-  end
-  return systemRet "git update-ref -m \"git stash-commit\" refs/#{branch} #{target}"
-end
-
-# branchをdetached branchへ
-def toRef(branch)
-  return false if !updateRef branch, branch
-  if `git branch-name` == branch
-    # 削除の為の切り替え
-    return false if !systemRet "git checkout --detach \"#{branch}\""
-  end
-  return false if !systemRet "git branch -D \"#{branch}\""
-
-  return true
-end
-
-# detached branchを削除する
-def deleteRef(branch)
-  return systemRet "git update-ref -d refs/#{branch}"
-end
-
-# detached branch用rebase、rebase成功時にbranchも更新する
-def rebaseRef(upstream, branch)
-  systemRet "git rebase \"#{upstream}\" \"#{branch}\" --exec \"git update-ref refs/#{branch} HEAD\""
-end
-
-def rebaseOntoRef(newbase, upstream, branch)
-  systemRet "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{branch}\" --exec \"git update-ref refs/#{branch} HEAD\""
-end
+G = Struct.new(:tmp, :patch, :backup)
+# XXX : めちゃ遅い
+$g = G.new(
+  BranchFactory::find(Cmd::getTmp),
+  BranchFactory::find(Cmd::getPatchRemain),
+  BranchFactory::find(Cmd::getBackup))
 
 # --------------------------------------------------
 
 def validateRebase
-  return true if getTmp != ''
-  return true if systemRet 'git rebase-in-progress'
-  return true if getPatchRemain != ''
+  return true if $g.tmp
+  return true if Cmd::rebaseInProgress?
+  return true if $g.patch
 
   puts 'stash-commit (--continue | --skip | --abort) is not need'
   return false
@@ -111,19 +65,19 @@ def validateFromTo(fromto)
 end
 
 def validateStashCommitFromTo(branch)
-  if systemRet 'git rebase-in-progress'
+  if Cmd::rebaseInProgress?
     puts 'now rebase in progress, please fix it'
     return false
   end
-  if getTmp != ''
+  if $g.tmp
     puts 'find tmp branch, please fix it'
     return false
   end
-  if getPatchRemain != ''
+  if $g.patch
     puts 'find patch branch, please fix it'
     return false
   end
-  if getBackup != ''
+  if $g.backup
     puts'find backup branch, please fix it'
     return false
   end
@@ -149,7 +103,7 @@ def validateRename(branch, renameOld, renameNew)
 end
 
 def validateStashCommitFrom(branch)
-  if `git changes-count` != '0'
+  if Cmd::changesCount != '0'
     puts 'find editing files, please fix it'
     return false
   end
@@ -159,7 +113,7 @@ def validateStashCommitFrom(branch)
 end
 
 def validateStashCommitTo(branch)
-  if `git changes-count` == '0'
+  if Cmd::changesCount == '0'
     puts 'not need'
     return false
   end
@@ -170,213 +124,200 @@ end
 
 # --------------------------------------------------
 
-def tryBackup(branch)
-  backupBranch = stashName branch, BACKUP_SUFFIX
-  return false if !updateRef backupBranch
-  return false if !systemRet "git checkout --detach \"#{backupBranch}\""
-  msg = <<-EOS
+def createBackup(_branch)
+  retBackup = DetachBranch.new Cmd::stashName(_branch, BACKUP_SUFFIX), _branch
+  branch = BranchFactory::find _branch
+  retBackup.commit Branch::CommitMode::ALL, <<-EOS
+backup from #{_branch}: #{Cmd::revision _branch}
+
 *** backup commit ***
 'stash-commit --to' working backup commit
 EOS
-  hash=`git revision \"#{branch}\"`
-  return false if !systemRet "git commit --all -m \"backup from #{branch}: #{hash}\n\n#{msg}\""
-  return false if !updateRef backupBranch
-  return false if !systemRet "git checkout \"#{branch}\""
-  return false if !systemRet "git cherry-pick --no-commit \"#{backupBranch}\""
-  return false if !systemRet 'git reset' # cancel 'git add'
+  branch.cherryPickNoCommit retBackup.name
+  branch.reset # cancel 'git add'
 
-  return true
+  retBackup
 end
 
-def tryCommitAll(stashBranch, commitMessage)
-  branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
-  return false if !systemRet "git checkout -b \"#{stashBranch}\""
-  if !systemRet "git commit --all -m \"#{commitMessage}\""
-    # allなので来ないけど、patch側とコードの統一
-    return false if !systemRet "git checkout \"#{branch}\""
-    return false if !systemRet "git branch -d \"#{stashBranch}\""
+def _tryCommit(stash, mode, commitMessage, &onFail)
+  root = BranchFactory::find stash.name.match(/^#{PREFIX}\/(.+)@.+$/)[1]
+  stash.commit(mode, commitMessage){
+    # commit --patchのキャンセル時ここに来る
+    root.checkout
+    $g.backup.delete
+    onFail.call
+  }
 
-    return false
-  end
+  if Cmd::changesCount != '0'
+    remain = DetachBranch.new "#{stash.name}-#{PATCH_REMAIN_SUFFIX}", stash.name
+    remain.commit Branch::CommitMode::ALL, <<-EOS
+patch-remain from #{Cmd::revision stash.name}: #{hash}
 
-  return true
-end
-
-def tryCommitPatch(stashBranch, commitMessage)
-  branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
-  return false if !systemRet "git checkout -b \"#{stashBranch}\""
-  if !systemRet "git commit --patch -m \"#{commitMessage}\""
-    # キャンセル時ここに来る
-    return false if !systemRet "git checkout \"#{branch}\""
-    return false if !systemRet "git branch -d \"#{stashBranch}\""
-    return false if !deleteRef getBackup
-
-    return false
-  end
-
-  if `git changes-count` != '0'
-    remain = "#{stashBranch}-#{PATCH_REMAIN_SUFFIX}"
-    return false if !updateRef remain
-    return false if !systemRet "git checkout --detach \"#{remain}\""
-    warningMsg = <<-EOS
 *** patch remain ***
 'stash-commit --patch' working patch remain commit.
 
-please fix conflicts without '#{stashBranch}' contents
+please fix conflicts without '#{stash.name}' contents
 EOS
-    hash=`git revision \"#{stashBranch}\"`
-    return false if !systemRet "git commit --all -m \"patch-remain from #{stashBranch}: #{hash}\n\n#{warningMsg}\""
-    return false if !updateRef remain
+    $g.patch = remain
   end
+
+  return true
+end
+def tryCommitAll(stash, commitMessage, &onFail)
+  _tryCommit(stash, Branch::CommitMode::ALL, commitMessage){onFail.call}
+end
+def tryCommitPatch(stash, commitMessage, &onFail)
+  _tryCommit(stash, Branch::CommitMode::PATCH, commitMessage){onFail.call}
+end
+
+def tryStashCommitToInternal(stash, commitMessage, commit, reset=true, backup=true)
+  root = BranchFactory::find stash.name.match(/^#{PREFIX}\/(.+)@.+$/)[1]
+
+  $g.backup = createBackup root.name if backup
+
+  case commit
+  when Commit::ALL
+    return false if !tryCommitAll(stash, commitMessage){stash.delete}
+    root.checkout
+  when Commit::PATCH
+    return false if !tryCommitPatch(stash, commitMessage){stash.delete}
+
+    if $g.patch
+      $g.patch.rebaseOnto root.name, "#{$g.patch.name}~"
+
+      if reset
+        revision = Cmd::revision root.name
+        root.rebase $g.patch.name
+        $g.patch.delete
+        root.reset revision
+      else
+        root.checkout
+      end
+    else
+      root.checkout
+    end
+  end
+
+  $g.backup.delete if backup
 
   return true
 end
 
 def tryStashCommitTo(stashBranch, commitMessage, commit, reset=true, backup=true)
-  branch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
-
-  if backup
-    return false if !tryBackup branch
-  end
-
-  case commit
-  when Commit::ALL
-    return false if !tryCommitAll stashBranch, commitMessage
-    return false if !systemRet "git checkout \"#{branch}\""
-  when Commit::PATCH
-    return false if !tryCommitPatch stashBranch, commitMessage
-
-    remain = "#{stashBranch}-#{PATCH_REMAIN_SUFFIX}"
-    if systemRet "git stash-commit-ref-exist \"#{remain}\""
-      return false if !rebaseOntoRef branch, "#{remain}~", remain
-
-      if reset
-        revision = `git revision \"#{branch}\"`
-        return false if !systemRet "git rebase \"#{remain}\" \"#{branch}\""
-        return false if !deleteRef remain
-        return false if !systemRet "git reset \"#{revision}\""
-      else
-        return false if !systemRet "git checkout \"#{branch}\""
-      end
-    else
-      return false if !systemRet "git checkout \"#{branch}\""
-    end
-  end
-
-  if backup
-    return false if !deleteRef getBackup
-  end
-
-  return true
+  rootBranch = stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
+  stash = Branch::new stashBranch, rootBranch
+  tryStashCommitToInternal stash, commitMessage, commit, reset, backup
 end
 
 def tryStashCommitToGrow(branch, to, commitMessage, commit)
-  stashBranch = stashName branch, to
+  stashBranch = Cmd::stashName branch, to
+  root = BranchFactory::find stashBranch.match(/^#{PREFIX}\/(.+)@.+$/)[1]
 
-  return false if !tryBackup branch
+  $g.backup = createBackup root.name
 
-  if !systemRet "git branch-exist \"#{stashBranch}\""
+  if !Cmd::branchExist? stashBranch
     # 新規作成
-    return false if !tryStashCommitTo stashBranch, commitMessage, commit, true, false
+    stash = Branch.new stashBranch, root.name
+    return false if !tryStashCommitToInternal stash, commitMessage, commit, true, false
   else
     # 存在してるので、そのブランチへ追加する
     # 一端新規作成し
-    tmpBranch = stashName branch, "#{to}-#{TMP_SUFFIX}"
-    if !tryStashCommitTo tmpBranch, commitMessage, commit, false, false
-      toRef tmpBranch if systemRet "git branch-exist \"#{tmpBranch}\""
-      return false
-    end
+    tmp = DetachBranch.new "#{stashBranch}-#{TMP_SUFFIX}", root.name
+    return false if !tryStashCommitToInternal tmp, commitMessage, commit, false, false
 
-    # tmpBranchをdetached branch化
-    return false if !toRef tmpBranch
+    stash = BranchFactory::find stashBranch
 
     # rebaseで追加
-    return false if !rebaseRef stashBranch, tmpBranch
-    return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
-    return false if !deleteRef tmpBranch
-    return false if !systemRet "git checkout \"#{branch}\""
+    tmp.rebase stash.name
+    stash.rebase tmp.name
+    tmp.delete
+
+    root.checkout
 
     case commit
     when Commit::ALL
       # no-op
     when Commit::PATCH
-      remain = "#{tmpBranch}-#{PATCH_REMAIN_SUFFIX}"
-      if systemRet "git stash-commit-ref-exist \"#{remain}\""
-        revision = `git revision \"#{branch}\"`
-        return false if !systemRet "git rebase \"#{remain}\" \"#{branch}\""
-        return false if !deleteRef remain
-        return false if !systemRet "git reset \"#{revision}\""
+      if $g.patch
+        revision = Cmd::revision root.name
+        root.rebase $g.patch.name
+        $g.patch.delete
+        root.reset revision
       end
     end
   end
 
-  return false if !deleteRef getBackup
+  $g.backup.delete
 
   return true
 end
 
 # --------------------------------------------------
 
-def tryStashCommitFrom(branch, from)
-  stashBranch = stashName branch, from
-  baseHash = `git show-branch --merge-base "#{branch}" "#{stashBranch}" | tr -d '\n'`
-  return false if !systemRet "git rebase --onto \"#{branch}\" \"#{baseHash}\" \"#{stashBranch}\""
+def tryStashCommitFrom(_branch, from)
+  stash = BranchFactory::find (Cmd::stashName _branch, from)
+  branch = BranchFactory::find _branch
+
+  baseHash = Cmd::mergeBaseHash branch.name, stash.name
+  stash.rebaseOnto branch.name, baseHash
 
   # ここまでくれば安心
-  revision = `git revision \"#{branch}\"`
-  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{branch}\""
-  return false if !systemRet "git branch -d \"#{stashBranch}\""
-  return false if !systemRet "git reset \"#{revision}\""
+  revision = Cmd::revision branch.name
+  branch.rebase stash.name
+  stash.delete
+  branch.reset revision
 
   return true
 end
 
 # --------------------------------------------------
 
-def tryStashCommitContinueTo(tmpBranch, patchBranch)
+def tryStashCommitContinueTo(tmp, patch)
   # rebase --continue前かもしれない
-  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --continue')
+  Cmd::exec('git rebase --continue') if Cmd::rebaseInProgress?
 
-  if patchBranch != ''
-    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+  if patch
+    root = BranchFactory::find patch.name.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
     # rebase --skip後かもしれない
-    if systemRet "git same-branch \"#{patchBranch}\" \"#{rootBranch}\""
+    if Cmd::sameBranch? patch.name, root.name
       puts "stop, '#{PATCH_REMAIN_SUFFIX}' rebase --skip found, from starting stash-commit --patch"
-      return false
+      raise
     end
     # rebase --abort後かもしれない
-    if !systemRet "git parent-child-branch \"#{patchBranch}\" \"#{rootBranch}\""
-      return false if !rebaseOntoRef rootBranch, "#{patchBranch}~", patchBranch
+    if !Cmd::parentChildBranch? patch.name, root.name
+      patch.rebaseOnto root.name, "#{patch.name}~"
     end
   end
-  if tmpBranch != ''
-    stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+  if tmp
+    stash = BranchFactory::find tmp.name.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
     # rebase --skip後かもしれない
-    if systemRet "git same-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+    if Cmd::sameBranch? tmp.name, stash.name
       puts "stop, '#{TMP_SUFFIX}' rebase --skip found, from starting stash-commit --to"
-      return false
+      raise
     end
     # rebase --abort後かもしれない
-    if !systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
-      return false if !rebaseOntoRef stashBranch, "#{tmpBranch}~", tmpBranch
+    if !Cmd::parentChildBranch? tmp.name, stash.name
+      tmp.rebaseOnto stash.name, "#{tmp.name}~"
     end
   end
 
   # ここまでくれば安心
-  if tmpBranch != ''
-    rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
-    stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
-    return false if !rebaseRef stashBranch, tmpBranch
-    return false if !systemRet "git rebase \"#{tmpBranch}\" \"#{stashBranch}\""
-    return false if !deleteRef tmpBranch
-    return false if !systemRet "git checkout \"#{rootBranch}\""
+  if tmp
+    root = BranchFactory::find tmp.name.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
+    stash = BranchFactory::find tmp.name.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+
+    tmp.rebase stash.name
+    stash.rebase tmp.name
+    tmp.delete
+    root.checkout
   end
-  if patchBranch != ''
-    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
-    revision = `git revision \"#{rootBranch}\"`
-    return false if !systemRet "git rebase  \"#{patchBranch}\" \"#{rootBranch}\""
-    return false if !deleteRef patchBranch
-    return false if !systemRet "git reset \"#{revision}\""
+  if patch
+    root = BranchFactory::find patch.name.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    revision = Cmd::revision root.name
+
+    root.rebase patch.name
+    patch.delete
+    root.reset revision
   end
 
   return true
@@ -384,33 +325,28 @@ end
 
 def tryStashCommitContinueFrom(branch)
   # tmpが無いので、rebase中の時のみ継続
-  return false if !systemRet 'git rebase-in-progress'
+  return false if !Cmd::rebaseInProgress?
 
   stashMatch = branch.match(/.+rebasing (#{PREFIX}\/.+)\)$/)
   rootMatch = branch.match(/.+rebasing #{PREFIX}\/(.+)@.+\)$/)
   return false if !stashMatch
-  return false if !systemRet 'git rebase --continue'
+  return false if !Cmd::execRet 'git rebase --continue'
 
   # ここまでくれば安心
-  stashBranch = stashMatch[1]
-  rootBranch = rootMatch[1]
-  revision = `git revision \"#{rootBranch}\"`
-  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{rootBranch}\""
-  return false if !systemRet "git branch -d \"#{stashBranch}\""
-  return false if !systemRet "git reset \"#{revision}\""
+  stash = BranchFactory::find stashMatch[1]
+  root = BranchFactory::find rootMatch[1]
+  revision = Cmd::revision root.name
+  root.rebase stash.name
+  stash.delete
+  root.reset revision
 
   return true
 end
 
 def tryStashCommitContinue(branch)
-  tmpBranch = getTmp
-  patchBranch = getPatchRemain
-  if tmpBranch != '' or patchBranch != ''
-    return false if !tryStashCommitContinueTo tmpBranch, patchBranch
-    backup = getBackup
-    if backup != ''
-      return false if !deleteRef backup
-    end
+  if $g.tmp or $g.patch
+    return false if !tryStashCommitContinueTo $g.tmp, $g.patch
+    $g.backup.delete if $g.backup
   else
     return false if !tryStashCommitContinueFrom branch
   end
@@ -420,44 +356,44 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitSkipTo(tmpBranch, patchBranch)
+def tryStashCommitSkipTo(tmp, patch)
   # rebase --skip前かもしれない
-  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --skip')
+  Cmd::exec('git rebase --skip') if Cmd::rebaseInProgress?
 
-  if patchBranch != ''
-    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+  if patch
+    root = BranchFactory::find patch.name.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
     # rebase --continue後かもしれない
-    if systemRet "git parent-child-branch \"#{patchBranch}\" \"#{rootBranch}\""
+    if Cmd::parentChildBranch? patch.name, root.name
       puts "stop, '#{PATCH_REMAIN_SUFFIX}' rebase --continue found, from starting stash-commit --patch"
-      return false
+      raise
     end
     # rebase --abort後はスルー
   end
-  if tmpBranch != ''
-    stashBranch = tmpBranch.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
+  if tmp
+    stash = BranchFactory::find tmp.name.match(/^(#{PREFIX}\/.+)-#{TMP_SUFFIX}$/)[1]
     # rebase --continue後かもしれない
-    if systemRet "git parent-child-branch \"#{tmpBranch}\" \"#{stashBranch}\""
+    if Cmd::parentChildBranch? tmp.name, stash.name
       puts "stop, '#{TMP_SUFFIX}' rebase --continue found, from starting stash-commit --to"
-      return false
+      raise
     end
     # rebase --abort後はスルー
   end
 
   # ここまでくれば安心
-  if tmpBranch != ''
-    rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
-    return false if !systemRet "git checkout \"#{rootBranch}\""
-    return false if !deleteRef tmpBranch # skipなので捨てる
+  if tmp
+    root = BranchFactory::find tmp.name.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
+    root.checkout
+    tmp.delete # skipなので捨てる
   end
-  if patchBranch != ''
-    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
-    patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
-    return false if !systemRet "git checkout \"#{rootBranch}\""
-    return false if !deleteRef patchBranch # skipなので捨てる
-    if systemRet "git branch-exist \"#{patchParentBranch}\""
-      return false if !systemRet("git branch -D \"#{patchParentBranch}\"")
-    else
-      deleteRef patchParentBranch # もしかしたらtmpBranchとして削除済み
+  if patch
+    root = BranchFactory::find patch.name.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    root.checkout
+    patch.delete # skipなので捨てる
+
+    # もしかしたらtmpとして削除済み
+    patchParent = BranchFactory::find patch.name.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    if patchParent
+      patchParent.delete
     end
   end
 
@@ -466,31 +402,26 @@ end
 
 def tryStashCommitSkipFrom(branch)
   # tmpが無いので、rebase中の時のみ継続
-  return false if !systemRet 'git rebase-in-progress'
+  return false if !Cmd::rebaseInProgress?
 
   stashMatch = branch.match(/.+rebasing (#{PREFIX}\/.+)\)$/)
   rootMatch = branch.match(/.+rebasing #{PREFIX}\/(.+)@.+\)$/)
   return false if !stashMatch
-  return false if !systemRet 'git rebase --skip'
+  return false if !Cmd::execRet 'git rebase --skip'
 
   # ここまでくれば安心
-  stashBranch = stashMatch[1]
-  rootBranch = rootMatch[1]
-  return false if !systemRet "git rebase \"#{stashBranch}\" \"#{rootBranch}\""
-  return false if !systemRet "git branch -d \"#{stashBranch}\""
+  stash = BranchFactory::find stashMatch[1]
+  root = BranchFactory::find rootMatch[1]
+  root.rebase stash.name
+  stash.delete
 
   return true
 end
 
 def tryStashCommitSkip(branch)
-  tmpBranch = getTmp
-  patchBranch = getPatchRemain
-  if tmpBranch != '' or patchBranch != ''
-    return false if !tryStashCommitSkipTo tmpBranch, patchBranch
-    backup = getBackup
-    if backup != ''
-      return false if !deleteRef backup
-    end
+  if $g.tmp or $g.patch
+    return false if !tryStashCommitSkipTo $g.tmp, $g.patch
+    $g.backup.delete if $g.backup
   else
     return false if !tryStashCommitSkipFrom branch
   end
@@ -500,66 +431,60 @@ end
 
 # --------------------------------------------------
 
-def tryStashCommitAbortTo(tmpBranch, patchBranch)
-  backup = getBackup
-  if backup == ''
+def tryStashCommitAbortTo(tmp, patch)
+  if !$g.backup
     puts "stop, '#{BACKUP_SUFFIX}' is not found, from starting stash-commit --to"
     return false
   end
 
   # rebase --abort前かもしれない
-  return false if systemRet('git rebase-in-progress') && !systemRet('git rebase --abort')
+  Cmd::exec 'git rebase --abort' if Cmd::rebaseInProgress?
 
-  if tmpBranch != ''
-    rootBranch = tmpBranch.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
-    return false if !systemRet "git checkout \"#{rootBranch}\""
-    return false if !deleteRef tmpBranch
+  if tmp
+    root = BranchFactory::find tmp.name.match(/^#{PREFIX}\/(.+)@.+-#{TMP_SUFFIX}$/)[1]
+    root.checkout
+    tmp.delete
   end
-  if patchBranch != ''
-    rootBranch = patchBranch.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
-    patchParentBranch = patchBranch.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
-    return false if !systemRet "git checkout \"#{rootBranch}\""
-    return false if !deleteRef patchBranch
-    if systemRet "git branch-exist \"#{patchParentBranch}\""
-      return false if !systemRet("git branch -D \"#{patchParentBranch}\"")
-    else
-      deleteRef patchParentBranch # もしかしたらtmpBranchとして削除済み
+  if patch
+    root = BranchFactory::find patch.name.match(/^#{PREFIX}\/(.+)@.+-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    root.checkout
+    patch.delete
+
+    # もしかしたらtmpとして削除済み
+    patchParent = BranchFactory::find patch.name.match(/^(#{PREFIX}\/.+)-#{PATCH_REMAIN_SUFFIX}$/)[1]
+    if patchParent
+      patchParent.delete
     end
   end
 
   # ここまでくれば安心
-  rootBranch = backup.match(/^#{PREFIX}\/(.+)@#{BACKUP_SUFFIX}$/)[1]
-  return false if !systemRet "git checkout \"#{rootBranch}\""
-  return false if !systemRet "git cherry-pick --no-commit \"#{backup}\""
-  return false if !systemRet 'git reset' # cancel 'git add'
+  root = BranchFactory::find $g.backup.name.match(/^#{PREFIX}\/(.+)@#{BACKUP_SUFFIX}$/)[1]
+  root.checkout
+  root.cherryPickNoCommit $g.backup.name
+  root.reset # cancel 'git add'
 
   return true
 end
 
 def tryStashCommitAbortFrom(branch)
   # tmpが無いので、rebase中の時のみ継続
-  return false if !systemRet 'git rebase-in-progress'
+  return false if !Cmd::rebaseInProgress?
 
   rootMatch = branch.match(/.+rebasing #{PREFIX}\/(.+)@.+\)$/)
   return false if !rootMatch
-  return false if !systemRet 'git rebase --abort'
+  return false if !Cmd::execRet 'git rebase --abort'
 
   # ここまでくれば安心
-  rootBranch = rootMatch[1]
-  return false if !systemRet "git checkout \"#{rootBranch}\""
+  root = BranchFactory::find rootMatch[1]
+  root.checkout
 
   return true
 end
 
 def tryStashCommitAbort(branch)
-  tmpBranch = getTmp
-  patchBranch = getPatchRemain
-  if tmpBranch != '' or patchBranch != ''
-    return false if !tryStashCommitAbortTo tmpBranch, patchBranch
-    backup = getBackup
-    if backup != ''
-      return false if !deleteRef backup
-    end
+  if $g.tmp or $g.patch
+    return false if !tryStashCommitAbortTo $g.tmp, $g.patch
+    $g.backup.delete if $g.backup
   else
     return false if !tryStashCommitAbortFrom branch
   end
@@ -570,35 +495,7 @@ end
 # --------------------------------------------------
 
 def tryStashCommitRename(branch, renameOld, renameNew)
-  # 名前被りチェック
-  preCmd = "git stash-commit-list-all | sed -E 's/^#{PREFIX}\\/(.+)@.+$/\\1/g' | sort | uniq"
-
-  # renameOldの存在チェック
-  if `#{preCmd} | grep -w \"#{renameOld}\" | wc -l | tr -d '\n'` == '0'
-    puts "'#{renameOld}' name is not found"
-    return false
-  end
-
-  beforeCount = `#{preCmd} | wc -l | tr -d '\n'`
-  afterCount = `#{preCmd} | sed 's/#{renameOld}/#{renameNew}/' | sort | uniq | wc -l | tr -d '\n'`
-
-  # 数が減っている(= 名前が被ってる)
-  if beforeCount != afterCount
-    puts 'name is overlap'
-    return false
-  end
-
-  # ここまでくれば安心
-  # rename処理
-  renameCmd = <<-EOS
-git stash-commit-list-all | \
-  grep -E "^.+#{renameOld}@.+$" | \
-  awk '{old=$0; new=$0; sub("#{renameOld}", "#{renameNew}", new); print old; print new;}' | \
-  xargs -L 2 git branch -m
-EOS
-  return false if !systemRet renameCmd
-
-  return true
+  Cmd::stashCommitRename renameOld, renameNew
 end
 
 # --------------------------------------------------
@@ -621,6 +518,8 @@ usage)
   git stash-commit --rename <oldname> <newname>
     NOTE : #{PREFIX}/<oldname>@to #{PREFIX}/<newname>@to
   git stash-commit help
+  git stash-commit <any args> [-d]
+    options : -d | --debug      debug mode, show backtrace
 EOS
 end
 
@@ -644,15 +543,7 @@ class ArgvIterator
     else
       puts '* error: argument is not enoufh'
       usage
-      Kernel.exit false
-    end
-  end
-
-  def rebaseMode
-    if @argv.length != 1
-      puts '* error: illegal argument'
-      usage
-      Kernel.exit false
+      raise
     end
   end
 end
@@ -668,10 +559,12 @@ module Commit
   PATCH = '--patch'
 end
 
+$debugMode = false
+
 def main(argv)
-  hash=`git revision`
-  branch=`git branch-name`
-  title=`git title`
+  hash = Cmd::revision
+  branch = Cmd::branchName
+  title = Cmd::title
 
   commitMessage = "WIP on #{branch}: #{hash} #{title}" # default
   to = nil
@@ -698,13 +591,10 @@ def main(argv)
     when '-p', '--patch'
       commit = Commit::PATCH
     when '--continue'
-      itArgv.rebaseMode
       rebase = Rebase::CONTINUE
     when '--skip'
-      itArgv.rebaseMode
       rebase = Rebase::SKIP
     when '--abort'
-      itArgv.rebaseMode
       rebase = Rebase::ABORT
     when '--rename'
       renameOld = itArgv.next
@@ -712,79 +602,105 @@ def main(argv)
     when 'help'
       usage
       Kernel.exit true
+    when '-d', '--debug'
+      $debugMode = true
     else
       puts "* error: unknown option:#{arg}"
       usage
-      Kernel.exit false
+      raise
     end
   end
 
   # [rebase] --continue | --skip | --abort
   # --------------------------------------
   if rebase != nil
-    if validateRebase
+    begin
+      raise if !validateRebase
       case rebase
       when Rebase::CONTINUE
-        return if tryStashCommitContinue branch
+        raise if !tryStashCommitContinue branch
       when Rebase::SKIP
-        return if tryStashCommitSkip branch
+        raise if !tryStashCommitSkip branch
       when Rebase::ABORT
-        return if tryStashCommitAbort branch
+        raise if !tryStashCommitAbort branch
       end
+      return true
+    rescue => e
+      puts "* failed: stash-commit #{rebase}"
+      raise e
     end
-
-    puts "* failed: stash-commit #{rebase}"
-    Kernel.exit false
   end
 
   # --rename
   # --------
   if renameOld != nil
-    if validateRename branch, renameOld, renameNew
-      return if tryStashCommitRename branch, renameOld, renameNew
+    begin
+      raise if !validateRename branch, renameOld, renameNew
+      raise if !tryStashCommitRename branch, renameOld, renameNew
+      return true
+    rescue => e
+      puts '* failed: stash-commit --rename'
+      raise e
     end
-
-    puts '* failed: stash-commit --rename'
-    Kernel.exit false
   end
 
   # stash-commit --from | --to
   # --------------------------
   if from != nil
-    if validateFromTo from and
-       validateStashCommitFrom branch
-      return if tryStashCommitFrom branch, from
+    begin
+      raise if !validateFromTo from or !validateStashCommitFrom branch
+      raise if !tryStashCommitFrom branch, from
+      return true
+    rescue => e
+      puts '* failed: stash-commit --from (index | name)'
+      raise e
     end
-
-    puts '* failed: stash-commit --from (index | name)'
-    Kernel.exit false
   elsif to != nil
     # --to 指定がある時
-    if validateFromTo to and
-       validateStashCommitTo branch
-      return if tryStashCommitToGrow branch, to, commitMessage, commit
+    begin
+      raise if !validateFromTo to or !validateStashCommitTo branch
+      raise if !tryStashCommitToGrow branch, to, commitMessage, commit
+      return true
+    rescue => e
+      puts '* failed: stash-commit --to (index | name)'
+      raise e
     end
-
-    puts '* failed: stash-commit --to (index | name)'
-    Kernel.exit false
   else
     # --to 指定がない時
-    if validateStashCommitTo branch
-      MAX.times do |i|
-        stashBranch = stashName branch, i
-        if systemRet "git branch-exist \"#{stashBranch}\""
+    begin
+      raise if !validateStashCommitTo branch
+      (MAX+1).times do |i|
+        if i == MAX
+          puts '* error: branch is too many'
+          raise
+        end
+
+        stashBranch = Cmd::stashName branch, i
+        if Cmd::branchExist? stashBranch
           puts "\"#{stashBranch}\" is already exist"
           next
         end
 
-        return if tryStashCommitTo stashBranch, commitMessage, commit
-        break
+        raise if !tryStashCommitTo stashBranch, commitMessage, commit
+        return true
       end
+    rescue => e
+      puts '* failed: stash-commit'
+      raise e
     end
-
-    puts '* failed: stash-commit branch is too many'
-    Kernel.exit false
   end
+
+  raise 'logic error' # ここには来ないはず
 end
 
-main ARGV
+begin
+  raise if !main ARGV
+  puts 'done!'
+rescue => e
+  if $debugMode
+    puts "* error: #{e}" if !e.message.empty?
+    puts e.backtrace
+  end
+  puts 'failed'
+  Kernel.exit false
+end
