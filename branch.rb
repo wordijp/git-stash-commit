@@ -43,6 +43,7 @@ module BranchCommon
 
   def cherryPickNoCommit(target)
     checkout
+    puts "[#{@name}]: git cherry-pick --no-commit \"#{target}\""
     Cmd::exec "git cherry-pick --no-commit \"#{target}\""
   end
 
@@ -61,19 +62,25 @@ class Branch
       Cmd::execQuiet "git checkout \"#{deletedBranch}\""
     end
     opt = (force == true) ? '-D' : '-d'
+    revision = Cmd::revision @name
     Cmd::execQuiet "git branch #{opt} \"#{@name}\""
+    puts "Deleted detached branch #{@name} (was #{revision})"
   end
   def rebase(upstream)
-    Cmd::exec "git rebase \"#{upstream}\" \"#{@name}\""
+    puts "[#{@name}]: git rebase \"#{upstream}\""
+    Cmd::execForRebase @name, "git rebase \"#{upstream}\" \"#{@name}\""
   end
   def rebaseOnto(newbase, upstream)
-    Cmd::exec "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{@name}\""
+    puts "[#{@name}]: git rebase --onto \"#{newbase}\" \"#{upstream}\" <SELF>"
+    Cmd::execForRebase @name, "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{@name}\""
   end
   def reset(target='')
     if target != ''
       checkout
+      puts "[#{@name}]: git reset \"#{target}\""
       Cmd::exec "git reset \"#{target}\""
     else
+      puts "[#{@name}]: git reset"
       Cmd::exec 'git reset'
     end
   end
@@ -81,6 +88,7 @@ class Branch
     msg = (_msg != '') ? "-m \"#{_msg}\"" : ''
     begin
       checkout
+      puts "[#{@name}]: git commit #{mode} ..."
       Cmd::exec "git commit #{mode} #{msg}"
     rescue => e
       onFail.call if block_given?
@@ -93,7 +101,8 @@ class Branch
       Cmd::branchExist? @name
     end
     def make(target)
-      Cmd::exec "git branch \"#{@name}\" \"#{target}\""
+      Cmd::execQuiet "git branch \"#{@name}\" \"#{target}\""
+      puts "Maked branch #{@name} (was #{Cmd::revision @name})"
     end
 end
 
@@ -108,20 +117,26 @@ class DetachBranch
     if deletedBranch != ''
       Cmd::execQuiet "git checkout \"#{deletedBranch}\""
     end
+    revision = Cmd::revision @name
     Cmd::execQuiet "git update-ref -d refs/#{@name}"
+    puts "Deleted detached branch #{@name} (was #{revision})"
   end
   def rebase(upstream)
-    Cmd::exec "git rebase \"#{upstream}\" \"#{@name}\" --exec \"git update-ref refs/#{@name} HEAD\""
+    puts "[#{@name}]: git rebase \"#{upstream}\""
+    Cmd::execForRebase @name, "git rebase \"#{upstream}\" \"#{@name}\" --exec \"git update-ref refs/#{@name} HEAD\""
   end
   def rebaseOnto(newbase, upstream)
-    Cmd::exec "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{@name}\" --exec \"git update-ref refs/#{@name} HEAD\""
+    puts "[#{@name}]: git rebase --onto \"#{newbase}\" \"#{upstream}\" <SELF>"
+    Cmd::execForRebase @name, "git rebase --onto \"#{newbase}\" \"#{upstream}\" \"#{@name}\" --exec \"git update-ref refs/#{@name} HEAD\""
   end
   def reset(target='')
     if target != ''
       checkout
+      puts "[#{@name}]: git reset \"#{target}\""
       Cmd::exec "git reset \"#{target}\""
-      Cmd::exec "git update-ref refs/#{@name} HEAD"
+      Cmd::execQuiet "git update-ref refs/#{@name} HEAD"
     else
+      puts "[#{@name}]: git reset"
       Cmd::exec 'git reset'
     end
   end
@@ -129,8 +144,9 @@ class DetachBranch
     msg = (_msg != '') ? "-m \"#{_msg}\"" : ''
     begin
       checkout
+      puts "[#{@name}]: git commit #{mode} ..."
       Cmd::exec "git commit #{mode} #{msg}"
-      Cmd::exec "git update-ref refs/#{@name} HEAD"
+      Cmd::execQuiet "git update-ref refs/#{@name} HEAD"
     rescue => e
       onFail.call if block_given?
       raise e
@@ -143,5 +159,6 @@ class DetachBranch
     end
     def make(target)
       Cmd::execQuiet "git update-ref refs/#{@name} \"#{target}\""
+      puts "Maked detached branch #{@name} (was #{Cmd::revision @name})"
     end
 end

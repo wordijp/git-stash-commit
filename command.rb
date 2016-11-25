@@ -2,6 +2,7 @@
 
 $:.unshift File.dirname(__FILE__)
 require 'define.rb'
+require 'open3'
 
 module Cmd
   extend self
@@ -66,8 +67,15 @@ module Cmd
   # ----------------
   # stash-commit ---
   # stash-commmitのbranch一覧
-  def stashCommitListAll
-    `git branch | sed -E 's/^\\*/ /' | awk '{print $1}' | grep -E '^#{PREFIX}/'`
+  def listup(_branchName, all)
+    preCmd = "git branch | sed -E 's/^\\*/ /' | awk '{print $1}' | grep -E '^#{PREFIX}/'"
+    if all
+      print `#{preCmd}`
+    else
+      # グループ表示
+      rootBranch = _branchName.match(/^(#{PREFIX}\/)?(.+?)(@.+)?$/)[2]
+      print `#{preCmd} | grep "#{rootBranch}"`
+    end
   end
   def getTmp
     findFirstCommitStashRef(){|line| line.match(/#{TMP_SUFFIX}$/)}
@@ -183,6 +191,31 @@ EOS
   # 2つのブランチの交差点をcommit hashで返す
   def mergeBaseHash(a, b)
     `git show-branch --merge-base \"#{a}\" \"#{b}\"`.chomp
+  end
+
+  # ----------
+
+  # rebase専用コマンド
+  def execForRebase(name, rebaseCmd)
+    o, e, s = Open3::capture3 rebaseCmd
+    puts o if o != ''
+    if !s.success?
+      # NOTE : コンフリクト時、
+      #        標準出力にコンフリクトメッセージ
+      #        標準エラー出力に--continue | --skip | --abortについて
+      if o.match('CONFLICT') and o.match('Merge conflict')
+        STDERR.puts <<-EOS
+error: could not apply #{revision name}...
+
+problem resolved, run "git stash-commit --continue".
+skip this patch, run "git stash-commit --skip".
+cancel this time, run "git stash-commit --abort".
+EOS
+      else
+        STDERR.puts e
+      end
+      raise "failed, cmd:#{rebaseCmd}"
+    end
   end
 
   # ----------
