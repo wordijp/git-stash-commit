@@ -17,7 +17,6 @@ end
 MAX = 5
 
 G = Struct.new(:tmp, :patch, :backup)
-# XXX : めちゃ遅い
 $g = G.new(
   BranchFactory::find(Cmd::getTmp),
   BranchFactory::find(Cmd::getPatchRemain),
