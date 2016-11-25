@@ -17,7 +17,6 @@ end
 MAX = 5
 
 G = Struct.new(:tmp, :patch, :backup)
-# XXX : めちゃ遅い
 $g = G.new(
   BranchFactory::find(Cmd::getTmp),
   BranchFactory::find(Cmd::getPatchRemain),
@@ -611,8 +610,8 @@ def main(argv)
     end
   end
 
-  # [rebase] --continue | --skip | --abort
-  # --------------------------------------
+  # --continue | --skip | --abort
+  # -----------------------------
   if rebase != nil
     begin
       raise if !validateRebase
@@ -644,8 +643,8 @@ def main(argv)
     end
   end
 
-  # stash-commit --from | --to
-  # --------------------------
+  # --from | --to
+  # -------------
   if from != nil
     begin
       raise if !validateFromTo from or !validateStashCommitFrom branch

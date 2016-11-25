@@ -10,7 +10,7 @@ module Cmd
   def exec(cmd)
     raise "failed, cmd:#{cmd}" if !execRet cmd
   end
-  
+
   def execRet(cmd)
     Kernel.system(cmd)
     $?.success?
@@ -23,36 +23,45 @@ module Cmd
   def execRetQuiet(cmd)
     execRet "#{cmd} > /dev/null 2>&1"
   end
-  
+
   # 他のコマンド
-  
+
   def gitdirExist?
     execRetQuiet 'git rev-parse --git-dir'
   end
+  private
+    _memo_gitdir = nil
+    def gitdir
+      @_memo_gitdir = @_memo_gitdir || `git rev-parse --git-dir`.chomp
+    end
+  public
 
   def revision(target='HEAD')
-    `git rev-parse --short #{target} | tr -d '\n'`
-    #`git rev-parse --short #{target}`.chomp
+    `git rev-parse --short #{target}`.chomp
   end
   def title
     `git log -1 --pretty=format:\"%s\"`
   end
   def branchName
-	  `git branch | grep -E '^\\*' | sed -E 's/^\\* //' | tr -d '\n'`
-    # tuninged
-    #`git branch`.each_line {|line|
-    #  return line.chomp[2..-1] if line[0] == '*'
-    #}
+    `git branch`.each_line do |line|
+      return line[1..-1].strip if line[0] == '*'
+    end
   end
 
   # 引数のブランチは存在してるか?
   def branchExist?(branch)
-		`git branch | sed -E 's/^\\*/ /' | awk '{print $1}' | grep -E \"^#{branch}$\" | wc -l | tr -d '\n'` != '0'
+    `git branch`.each_line do |_line|
+      line = _line
+      line = line[1..-1] if line[0] == '*'
+      line = line.strip
+      return true if line == branch
+    end
+
+    return false
   end
   # 引数のdetached branchは存在してるか?
   def branchRefExist?(branch)
-		git_dir = `git rev-parse --git-dir | tr -d '\n'`
-    execRetQuiet "test -f \"#{git_dir}/refs/#{branch}\""
+    execRetQuiet "test -f \"#{gitdir}/refs/#{branch}\""
   end
   # ----------------
   # stash-commit ---
@@ -60,23 +69,31 @@ module Cmd
   def stashCommitListAll
     `git branch | sed -E 's/^\\*/ /' | awk '{print $1}' | grep -E '^#{PREFIX}/'`
   end
-  # stash-commmitのdetached branch一覧
-  def stashCommitListAllRef
-    `#{stashCommitListAllRefString}`
-  end
   def getTmp
-    `#{stashCommitListAllRefString} | grep -E '#{TMP_SUFFIX}$' | head -n 1 | tr -d '\n'`
+    findFirstCommitStashRef(){|line| line.match(/#{TMP_SUFFIX}$/)}
   end
   def getPatchRemain
-    `#{stashCommitListAllRefString} | grep -E '#{PATCH_REMAIN_SUFFIX}$' | head -n 1 | tr -d '\n'`
+    findFirstCommitStashRef(){|line| line.match(/#{PATCH_REMAIN_SUFFIX}$/)}
   end
   def getBackup
-    `#{stashCommitListAllRefString} | grep -E '#{BACKUP_SUFFIX}$' | head -n 1 | tr -d '\n'`
+    findFirstCommitStashRef(){|line| line.match(/#{BACKUP_SUFFIX}$/)}
   end
+  private
+    def findFirstCommitStashRef(&pred)
+      `find #{gitdir}/refs/#{PREFIX} -type f`.each_line do |_line|
+        line = _line.strip
+        line = line.sub(/^.*\.git\/refs\//, '')
+        return line if pred.call line
+      end
+      return ''
+    end
+  public
   def stashName(branch, no)
     "#{PREFIX}/#{branch}@#{no}"
   end
   def stashCommitRename(renameOld, renameNew)
+    # NOTE : 利用頻度低いので未tuning
+
     # 名前被りチェック
     preCmd = "#{stashCommitListAllString} | sed -E 's/^#{PREFIX}\\/(.+)@.+$/\\1/g' | sort | uniq"
 
@@ -108,31 +125,32 @@ EOS
     def stashCommitListAllString
       "git branch | sed -E 's/^\\*/ /' | awk '{print $1}' | grep -E '^#{PREFIX}/'"
     end
-    def stashCommitListAllRefString
-      git_dir = `git rev-parse --git-dir | tr -d '\n'`
-      "find #{git_dir}/refs/#{PREFIX} -type f | sed -E 's/^.*\\.git\\/refs\\///'"
-    end
   public
   # ----------------
 
   # trackedファイルの変更数
   def changesCount
-    `git status --untracked-files=no --short | wc -l | tr -d '\n'`
+    count = 0
+    `git status --untracked-files=no --short`.each_line {count += 1}
+    "#{count}"
   end
   # rebase中?
 	# http://stackoverflow.com/questions/3921409/how-to-know-if-there-is-a-git-rebase-in-progress
 	# rebase-apply : rebase
 	# rebase-merge : rebase -i
   def rebaseInProgress?
-		git_dir = `git rev-parse --git-dir | tr -d '\n'`
+		git_dir = gitdir
     execRetQuiet "test -d \"#{git_dir}/rebase-merge\" -o -d \"#{git_dir}/rebase-apply\""
   end
   # 引数のブランチは親子?
   def parentChildBranch?(a, b='HEAD')
-		hash_a_parent = `git rev-parse --short #{a}  | tr -d '\n'`
-		hash_a_child  = `git rev-parse --short #{a}~ | tr -d '\n'`
-		hash_b_parent = `git rev-parse --short #{b}  | tr -d '\n'`
-		hash_b_child  = `git rev-parse --short #{b}~ | tr -d '\n'`
+    hashs = `git rev-parse \"#{a}\" \"#{b}\" \"#{a}~\" \"#{b}~\"`.split
+
+    hash_a_parent = hashs[0] || ''
+    hash_b_parent = hashs[1] || ''
+    hash_a_child  = hashs[2] || ''
+    hash_b_child  = hashs[3] || ''
+
 		if hash_a_parent == ''
       puts 'illegal branch'
       return false
@@ -141,13 +159,16 @@ EOS
       puts 'illegal branch'
       return false
     end
-    
+
     hash_a_parent == hash_b_child or hash_b_parent == hash_a_child
   end
   # 引数のブランチは同じ?
   def sameBranch?(a, b='HEAD')
-		hash_a = `git rev-parse --short #{a} | tr -d '\n'`
-		hash_b = `git rev-parse --short #{b} | tr -d '\n'`
+    hashs = `git rev-parse \"#{a}\" \"#{b}\"`.split
+
+    hash_a = hashs[0] || ''
+    hash_b = hashs[1] || ''
+
 		if hash_a == ''
       puts 'illegal branch'
       return false
@@ -156,11 +177,18 @@ EOS
       puts 'illegal branch'
       return false
     end
-    
+
     hash_a == hash_b
   end
   # 2つのブランチの交差点をcommit hashで返す
   def mergeBaseHash(a, b)
-   `git show-branch --merge-base "#{a}" "#{b}" | tr -d '\n'`
+    `git show-branch --merge-base \"#{a}\" \"#{b}\"`.chomp
+  end
+
+  # ----------
+
+  def tuneLimit
+    # 一番軽いと思われる外部コマンド
+    `echo tuneLimit`
   end
 end
