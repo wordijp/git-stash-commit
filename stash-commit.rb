@@ -1,10 +1,9 @@
-#!ruby
+#!/usr/bin/env ruby
 
 $:.unshift File.dirname(__FILE__)
-require 'helper.rb'
-require 'branch.rb'
-require 'command.rb'
-require 'define.rb'
+require 'sclib/branch.rb'
+require 'sclib/command.rb'
+require 'sclib/define.rb'
 
 if !Cmd::gitdirExist?
   puts 'git dir is not found'
