@@ -88,7 +88,7 @@ module Cmd
   end
   private
     def findFirstCommitStashRef(&pred)
-      `find #{gitdir}/refs/#{PREFIX} -type f`.each_line do |_line|
+      `find #{gitdir}/refs/#{PREFIX} -type f 2> /dev/null`.each_line do |_line|
         line = _line.strip
         line = line.sub(/^.*\.git\/refs\//, '')
         return line if pred.call line
