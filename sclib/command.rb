@@ -190,7 +190,7 @@ EOS
   end
   # 2つのブランチの交差点をcommit hashで返す
   def mergeBaseHash(a, b)
-    `git show-branch --merge-base \"#{a}\" \"#{b}\"`.chomp
+    `git show-branch --merge-base \"#{a}\" \"#{b}\"`.chomp[0...7] # [0...7]: --short
   end
 
   # ----------
