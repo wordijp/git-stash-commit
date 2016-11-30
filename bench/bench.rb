@@ -1,7 +1,7 @@
-$:.unshift File.dirname(__FILE__)
-
+lib = File.expand_path('../lib', __FILE__)
+$LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 require 'benchmark'
-require 'command.rb'
+require 'git/stash/sclib/command.rb'
 
 N = 20
 
@@ -15,7 +15,7 @@ puts ":#{Cmd::getBackup}:"
 puts ":#{Cmd::changesCount}:"
 puts ":#{Cmd::parentChildBranch? 'HEAD', 'HEAD~'}:"
 puts ":#{Cmd::sameBranch? 'HEAD', 'HEAD'}:"
-puts ":#{Cmd::mergeBaseHash 'develop', 'master'}:"
+puts ":#{Cmd::mergeBaseHash 'master~', 'master'}:"
 
 def registBench(r, title, &cb)
   r.report title do
@@ -39,5 +39,5 @@ Benchmark.bm 20 do |r|
   registBench(r, 'changesCount'     ){Cmd::changesCount}
   registBench(r, 'parentChildBranch'){Cmd::parentChildBranch? 'HEAD', 'HEAD~'}
   registBench(r, 'sameBranch'       ){Cmd::sameBranch? 'HEAD', 'HEAD'}
-  registBench(r, 'mergeBaseHash'    ){Cmd::mergeBaseHash 'develop', 'master'}
+  registBench(r, 'mergeBaseHash'    ){Cmd::mergeBaseHash 'master~', 'master'}
 end
