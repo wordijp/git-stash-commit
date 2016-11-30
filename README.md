@@ -57,8 +57,6 @@ unstash branch, if when run 'git stash-commit --from NAME', apply 'stash-commit/
                      \
                       *        <-- stash-commit/topic@1
 
-if use the '--patch' option, only patch is commit.
-
 
 ## git-stash-commit commands
 
@@ -99,12 +97,13 @@ if conflict of 'stash-commit [--to N] [-p]' command, working branch remains.
   - delete on complete
 * stash-commit/*topic*@*to*-progresstmp
   - growth commit branch, contains change files of 'commit --patch', it add to '--to' target branch
-  - delete on add finish
+  - delete on complete
 * stash-commit/*topic*@*to*-progresstmp-patch-remain
-  - commit remain branch, contains remain change files of 'commit --patch', it apply the current orking tree state
+  - commit remain branch, contains remain change files of 'commit --patch', it apply the current working tree state
+  - delete on complete
 
-if fixed CONFLICT, add to it and run 'git stash-commit --continue'
-if cancel this time, run 'git stash-commit --abort'
+if fixed CONFLICT, add to it and run 'git stash-commit --continue'  
+if cancel this time, run 'git stash-commit --abort'  
 if skip this time, run 'git stash-commit --skip'
 
 these options behave like rebase.
