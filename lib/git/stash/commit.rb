@@ -276,7 +276,7 @@ def tryStashCommitContinueTo(tmp, patch)
     # rebase --skip後かもしれない
     if Cmd::sameBranch? patch.name, root.name
       puts "stop, '#{PATCH_REMAIN_SUFFIX}' rebase --skip found, from starting stash-commit --patch"
-      raise
+      raise ''
     end
     # rebase --abort後かもしれない
     if !Cmd::parentChildBranch? patch.name, root.name
@@ -288,7 +288,7 @@ def tryStashCommitContinueTo(tmp, patch)
     # rebase --skip後かもしれない
     if Cmd::sameBranch? tmp.name, stash.name
       puts "stop, '#{TMP_SUFFIX}' rebase --skip found, from starting stash-commit --to"
-      raise
+      raise ''
     end
     # rebase --abort後かもしれない
     if !Cmd::parentChildBranch? tmp.name, stash.name
@@ -360,7 +360,7 @@ def tryStashCommitSkipTo(tmp, patch)
     # rebase --continue後かもしれない
     if Cmd::parentChildBranch? patch.name, root.name
       puts "stop, '#{PATCH_REMAIN_SUFFIX}' rebase --continue found, from starting stash-commit --patch"
-      raise
+      raise ''
     end
     # rebase --abort後はスルー
   end
@@ -369,7 +369,7 @@ def tryStashCommitSkipTo(tmp, patch)
     # rebase --continue後かもしれない
     if Cmd::parentChildBranch? tmp.name, stash.name
       puts "stop, '#{TMP_SUFFIX}' rebase --continue found, from starting stash-commit --to"
-      raise
+      raise ''
     end
     # rebase --abort後はスルー
   end
@@ -541,7 +541,7 @@ class ArgvIterator
     else
       puts '* error: argument is not enoufh'
       usage
-      raise
+      raise ''
     end
   end
 end
@@ -611,7 +611,7 @@ def main(argv)
     else
       puts "* error: unknown option:#{arg}"
       usage
-      raise
+      raise ''
     end
   end
 
@@ -625,16 +625,16 @@ def main(argv)
   # -----------------------------
   if rebase != nil
     begin
-      raise if !validateRebase
+      raise '' if !validateRebase
       case rebase
       when Rebase::CONTINUE
-        raise if !tryStashCommitContinue branch
+        raise '' if !tryStashCommitContinue branch
       when Rebase::SKIP
-        raise if !tryStashCommitSkip branch
+        raise '' if !tryStashCommitSkip branch
       when Rebase::ABORT
-        raise if !tryStashCommitAbort branch
+        raise '' if !tryStashCommitAbort branch
       end
-      return true
+      return
     rescue => e
       puts "* failed: stash-commit #{rebase}"
       raise e
@@ -645,9 +645,9 @@ def main(argv)
   # --------
   if renameOld != nil
     begin
-      raise if !validateRename branch, renameOld, renameNew
-      raise if !tryStashCommitRename branch, renameOld, renameNew
-      return true
+      raise '' if !validateRename branch, renameOld, renameNew
+      raise '' if !tryStashCommitRename branch, renameOld, renameNew
+      return
     rescue => e
       puts '* failed: stash-commit --rename'
       raise e
@@ -658,9 +658,9 @@ def main(argv)
   # -------------
   if from != nil
     begin
-      raise if !validateFromTo from or !validateStashCommitFrom branch
-      raise if !tryStashCommitFrom branch, from
-      return true
+      raise '' if !validateFromTo from or !validateStashCommitFrom branch
+      raise '' if !tryStashCommitFrom branch, from
+      return
     rescue => e
       puts '* failed: stash-commit --from (index | name)'
       raise e
@@ -668,9 +668,9 @@ def main(argv)
   elsif to != nil
     # --to 指定がある時
     begin
-      raise if !validateFromTo to or !validateStashCommitTo branch
-      raise if !tryStashCommitToGrow branch, to, commitMessage, commit
-      return true
+      raise '' if !validateFromTo to or !validateStashCommitTo branch
+      raise '' if !tryStashCommitToGrow branch, to, commitMessage, commit
+      return
     rescue => e
       puts '* failed: stash-commit --to (index | name)'
       raise e
@@ -678,11 +678,11 @@ def main(argv)
   else
     # --to 指定がない時
     begin
-      raise if !validateStashCommitTo branch
+      raise '' if !validateStashCommitTo branch
       (MAX+1).times do |i|
         if i == MAX
           puts '* error: branch is too many'
-          raise
+          raise ''
         end
 
         stashBranch = Cmd::stashName branch, i
@@ -691,8 +691,8 @@ def main(argv)
           next
         end
 
-        raise if !tryStashCommitTo stashBranch, commitMessage, commit
-        return true
+        raise '' if !tryStashCommitTo stashBranch, commitMessage, commit
+        return
       end
     rescue => e
       puts '* failed: stash-commit'
@@ -710,7 +710,7 @@ module Stash
 module Commit
 
 begin
-  raise if !main ARGV
+  main ARGV
   puts 'done!'
 rescue => e
   if $debugMode
