@@ -24,7 +24,7 @@ module Cmd
 
   def execRetQuiet(cmd)
     return execRet "#{cmd} > /dev/null 2>&1" if !win?
-    execRet "#{cmd} > nul 2>%1"
+    execRet "#{cmd} > nul 2> nul"
   end
 
   # 他のコマンド
