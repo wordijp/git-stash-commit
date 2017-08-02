@@ -2,6 +2,7 @@
 
 $:.unshift File.dirname(__FILE__)
 require 'define.rb'
+require 'util.rb'
 require 'open3'
 
 module Cmd
@@ -22,7 +23,8 @@ module Cmd
   end
 
   def execRetQuiet(cmd)
-    execRet "#{cmd} > /dev/null 2>&1"
+    return execRet "#{cmd} > /dev/null 2>&1" if !win?
+    execRet "#{cmd} > nul 2>%1"
   end
 
   # 他のコマンド
@@ -88,7 +90,13 @@ module Cmd
   end
   private
     def findFirstCommitStashRef(&pred)
-      `find #{gitdir}/refs/#{PREFIX} -type f 2> /dev/null`.each_line do |_line|
+      ret = ''
+      if !win? then
+        ret = `find #{gitdir}/refs/#{PREFIX} -type f 2> /dev/null`
+      else
+        ret = `find #{gitdir}/refs/#{PREFIX} -type f 2> nul`
+      end
+      ret.each_line do |_line|
         line = _line.strip
         line = line.sub(/^.*\.git\/refs\//, '')
         return line if pred.call line
