@@ -120,7 +120,9 @@ module Cmd
     end
 
     beforeCount = `#{preCmd} | wc -l | tr -d '\n'`
-    afterCount = `#{preCmd} | sed 's/#{renameOld}/#{renameNew}/' | sort | uniq | wc -l | tr -d '\n'`
+    # NOTE: /利用のため、validateで弾いてる@をsed用の区切りに利用する
+    #afterCount = `#{preCmd} | sed 's/#{renameOld}/#{renameNew}/' | sort | uniq | wc -l | tr -d '\n'`
+    afterCount = `#{preCmd} | sed 's@#{renameOld}@#{renameNew}@' | sort | uniq | wc -l | tr -d '\n'`
 
     # 数が減っている(= 名前が被ってる)
     if beforeCount != afterCount
