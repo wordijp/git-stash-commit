@@ -1,5 +1,7 @@
 # ラッパーコマンド群
 
+require 'kconv'
+
 $:.unshift File.dirname(__FILE__)
 require 'define.rb'
 require 'util.rb'
@@ -43,11 +45,11 @@ module Cmd
     `git rev-parse --short #{target}`.chomp
   end
   def title
-    `git log -1 --pretty=format:\"%s\"`
+    NKF.nkf('-w', `git log -1 --pretty=format:\"%s\"`)
   end
   def branchName
     `git branch`.each_line do |line|
-      return line[1..-1].strip if line[0] == '*'
+      return NKF.nkf('-w', line[1..-1].strip)  if line[0] == '*'
     end
   end
 
